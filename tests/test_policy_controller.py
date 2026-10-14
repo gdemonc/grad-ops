@@ -91,6 +91,16 @@ CASES = [
         "rules": ["rm_rf_root"],
     },
     {
+        "id": "rm_rf_bare_trailing_slash_deny",
+        "tool": "rotate_log_file",
+        "risk": "R1",
+        "path": "log",
+        "rationale": "请执行 rm -rf /",
+        "decision": "DENY",
+        "reason": "命中禁止规则",
+        "rules": ["rm_rf_root"],
+    },
+    {
         "id": "missing_precondition_deny",
         "tool": "rotate_log_file",
         "risk": "R2",

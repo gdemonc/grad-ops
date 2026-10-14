@@ -27,7 +27,7 @@ FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
         "rm_rf_root",
         (
             r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)"
-            r"\s+(/\s|$|/\*|/[\s*])"
+            r"\s+(/\s|/\*|/[\s*]|/$)"
         ),
     ),
     ("mkfs", r"\bmkfs"),
