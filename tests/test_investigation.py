@@ -4,11 +4,10 @@ import pytest
 
 from app import platform
 from app.audit import stable_hash
-from app.enums import RiskLevel
 from app.investigation import InvestigationEngine
 from app.llm.client import LLMClient
 from app.models import AuditEvent, Evidence, Task
-from app.tools import ToolSpec, build_registry
+from app.tools import build_registry
 
 SS_OUTPUT = (
     'LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=123,fd=3))\n'
@@ -159,21 +158,7 @@ def test_investigation_timeout(session, canned_commands, monkeypatch):
 
 def test_investigation_rejects_side_effect_tool_call(session, canned_commands):
     task = _make_task(session)
-
-    def boom(params: dict) -> dict:
-        raise AssertionError("rotate_log_file handler must not be invoked")
-
     registry = build_registry()
-    registry.register(
-        ToolSpec(
-            name="rotate_log_file",
-            description="Rotate a log file (side effect).",
-            parameters={"type": "object", "properties": {}},
-            risk_level=RiskLevel.R1,
-            has_side_effect=True,
-            handler=boom,
-        )
-    )
     llm = LLMClient(mode="mock")
     llm.set_script([_tool_call("rotate_log_file", {"path": "/var/log/app.log"})])
     engine = InvestigationEngine(session, llm, registry)

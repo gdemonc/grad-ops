@@ -146,7 +146,7 @@ def test_check_service_health_rejects_injection(monkeypatch, service):
 
 def test_registry_has_five_observation_tools():
     registry = build_registry()
-    tools = registry.all()
+    tools = registry.observation_only()
     assert len(tools) == 5
     assert all(tool.has_side_effect is False for tool in tools)
     assert all(tool.risk_level == RiskLevel.R0 for tool in tools)
@@ -156,9 +156,15 @@ def test_registry_has_five_observation_tools():
         "disk_usage",
         "read_service_log",
         "check_service_health",
+        "backup_log_file",
+        "rotate_log_file",
     }
     assert len(registry.observation_only()) == 5
-    assert registry.side_effect_only() == []
+    assert {spec.name for spec in registry.side_effect_only()} == {
+        "backup_log_file",
+        "rotate_log_file",
+    }
+    assert all(spec.has_side_effect for spec in registry.side_effect_only())
 
 
 def test_run_command_timeout():
