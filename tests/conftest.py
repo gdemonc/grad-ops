@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 os.environ["GRADOPS_DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["GRADOPS_LLM_MODE"] = "mock"
@@ -16,7 +17,11 @@ from app.main import build_app
 
 @pytest.fixture()
 def session():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
     s = TestingSession()
