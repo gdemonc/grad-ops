@@ -47,6 +47,7 @@ npm --prefix frontend run dev
 - 开发机为 Windows，工具层经 `app/platform.py` 适配；在 Linux 上只读工具使用**真实语义**：`ss -Hlnpt`、`ps`、`df -hP`、`journalctl -u <svc> -n 50`、`systemctl is-active <svc>`，Windows 下分别映射为 `Get-NetTCPConnection`、`Get-Process`、`Get-PSDrive`、日志文件尾读取、`Get-Service`。
 - **建议以受限用户运行**（不要用 root）：创建专用用户（如 `gradops-agent`）并保持 `GRADOPS_ALLOW_ROOT_EXECUTOR=false`。执行器在 `uid == 0` 时会拒绝副作用工具，`GET /api/safety/report` 也会把该状态标记为 `blocked`。
 - 部署形态即「uvicorn + worker 脚本 + SQLite 文件」，无需 Docker / PostgreSQL。
+- **K8s 只读扩展**：`list_pods`、`get_pod_logs` 通过 `kubectl` 取证，默认只允许 `default` 命名空间，可用 `GRADOPS_K8S_NAMESPACES` 收窄或放开；未安装 kubectl 或集群不可达时返回失败证据，不会中断服务。
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
@@ -88,7 +89,7 @@ GRADOPS_LLM_MODEL=qwen-plus-latest
 ## 测试
 
 ```powershell
-python -m pytest                 # 当前 137 passed, 1 skipped（pyproject addopts 已含 -q，勿再叠加 -q，否则 -qq 会隐藏汇总行）
+python -m pytest                 # 当前 156 passed, 1 skipped（pyproject addopts 已含 -q，勿再叠加 -q，否则 -qq 会隐藏汇总行）
 python -m pytest --cov=app --cov-report=term   # 覆盖率：总体 89%，核心模块 policy/executor/verification/audit 均 ≥85%
 npm --prefix frontend run build  # 前端类型检查 + 构建
 ```
@@ -110,8 +111,9 @@ grad-ops/
 │   │   ├── boundary.py
 │   │   ├── controller.py
 │   │   └── rules.py
-│   ├── tools/               # 7 项工具：5 只读观测 + 2 副作用
+│   ├── tools/               # 9 项工具：7 只读观测 + 2 副作用
 │   │   ├── base.py
+│   │   ├── k8s.py
 │   │   ├── observation.py
 │   │   ├── registry.py
 │   │   └── side_effect.py
@@ -147,7 +149,7 @@ grad-ops/
 │   ├── run_dev.ps1          # Windows 开发启动 uvicorn
 │   ├── run_dev.sh           # Linux 开发启动 uvicorn
 │   └── worker.py            # 独立 Worker 进程入口
-├── tests/                   # 138 个用例（对抗、篡改、重放、架构守护等）
+├── tests/                   # 157 个用例（对抗、篡改、重放、架构守护等）
 ├── .env.example
 └── pyproject.toml
 ```
@@ -164,7 +166,9 @@ grad-ops/
 | [`docs/sequence-rollback.md`](docs/sequence-rollback.md) | 验证失败回滚时序图 |
 | [`docs/threat-model.md`](docs/threat-model.md) | 威胁模型表：资产 / 攻击面 / 对策 / 验证用例 |
 | [`docs/test-report.md`](docs/test-report.md) | 测试统计、用例分布、跳过说明、核心模块覆盖率 |
+| [`docs/related-work.md`](docs/related-work.md) | 相关工作：代表性论文、对比表、差异化定位、GB/T 7714 参考文献 |
 | [`docs/plans/2026-10-14-grad-ops-core-loop.md`](docs/plans/2026-10-14-grad-ops-core-loop.md) | 实施计划（任务 1–19 与验收清单） |
+| [`docs/plans/2026-10-26-multi-host-go-agent.md`](docs/plans/2026-10-26-multi-host-go-agent.md) | 多主机主从平台 + Go Agent 设计方案与分阶段实施计划 |
 | [`docs/specs/2026-10-14-core-loop-spec.md`](docs/specs/2026-10-14-core-loop-spec.md) | 规格说明：核心闭环、安全性质、风险模型、明确不做 |
 
 ## License

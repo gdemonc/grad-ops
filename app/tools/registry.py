@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.tools.base import ToolError, ToolSpec
+from app.tools.k8s import K8S_SPECS
 from app.tools.observation import OBSERVATION_SPECS
 from app.tools.side_effect import register_side_effect_tools
 
@@ -35,7 +36,7 @@ class ToolRegistry:
 
 def build_registry() -> ToolRegistry:
     registry = ToolRegistry()
-    for spec in OBSERVATION_SPECS:
+    for spec in OBSERVATION_SPECS + K8S_SPECS:
         registry.register(spec)
     register_side_effect_tools(registry)
     return registry

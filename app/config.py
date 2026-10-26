@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     executor_user: str = "gradops-agent"
     allow_root_executor: bool = False
     auto_policy_refs: list[str] = []   # 允许自动执行的策略引用，空=全部人工审批
+    k8s_namespaces: list[str] = ["default"]   # K8s 只读工具允许访问的命名空间
 
 
 settings = Settings()

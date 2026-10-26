@@ -14,7 +14,7 @@ flowchart TD
     QUEUE -->|"claim_next 原子认领"| WORKER["Worker 状态机主循环"]
     WORKER --> SCAN["请求禁止模式扫描 scan_forbidden"]
     SCAN -->|"命中 rm -rf / 等"| REJ["REJECTED 工具调用数为 0"]
-    SCAN -->|"未命中"| INV["InvestigationEngine LLM + 5 项只读工具"]
+    SCAN -->|"未命中"| INV["InvestigationEngine LLM + 7 项只读工具"]
     INV --> EVID[("Evidence 证据表")]
     INV --> GND["Grounding 结论绑定证据"]
     GND --> POL{"PolicyController 确定性策略"}
@@ -36,7 +36,7 @@ flowchart TD
 说明：
 
 - 用户与前端只经 `FastAPI /api` 交互，任务由 `TaskQueue` 落库，独立 Worker 进程（`scripts/worker.py`）以租约方式认领并按状态机推进。
-- LLM 仅出现在调查环节（`app/llm/`），且只能被授予 5 项只读工具；策略、审批、执行、验证四个环节完全不依赖模型输出。
+- LLM 仅出现在调查环节（`app/llm/`），且只能被授予 7 项只读工具；策略、审批、执行、验证四个环节完全不依赖模型输出。
 - 审计链是旁路而非事后补记：每个阶段都通过 `AuditLog.append` 写入带 `prev_hash` 的事件。
 
 ## 模块表
@@ -62,7 +62,8 @@ flowchart TD
 | `app/policy/controller.py` | 确定性策略控制器，按固定顺序裁决且不 import 任何模型代码 | `PolicyController.evaluate`、`PolicyDecision` |
 | `app/llm/client.py` | OpenAI 兼容客户端，mock / live 双模式、重试与 JSON 解析 | `LLMClient.complete_json`、`LLMUnavailable`、`LLMFormatError` |
 | `app/tools/base.py` | 工具规格数据类与工具异常 | `ToolSpec`、`ToolError` |
-| `app/tools/observation.py` | 5 项只读观测工具及 Linux/Windows 双平台解析 | `list_listening_ports`、`list_processes`、`disk_usage`、`read_service_log`、`check_service_health` |
+| `app/tools/observation.py` | 5 项主机只读观测工具及 Linux/Windows 双平台解析 | `list_listening_ports`、`list_processes`、`disk_usage`、`read_service_log`、`check_service_health` |
+| `app/tools/k8s.py` | 2 项 K8s 只读工具，受命名空间白名单约束 | `list_pods`、`get_pod_logs` |
 | `app/tools/side_effect.py` | 2 项副作用工具处理器 | `backup_log_file`、`rotate_log_file`、`register_side_effect_tools` |
 | `app/tools/registry.py` | 工具注册表，按只读 / 副作用分组查询 | `ToolRegistry`、`build_registry` |
 | `app/api/tasks.py` | 任务提交、列表、详情与审计时间线路由 | `create_task`、`list_tasks`、`get_task`、`get_task_timeline` |
@@ -119,8 +120,8 @@ stateDiagram-v2
 | 存储 | PostgreSQL + pgvector 知识库 | SQLite（SQLAlchemy 2.0），单文件、零外部依赖 |
 | 智能体编排 | 5 角色多 Agent 协作 | 单一调查 Agent（`InvestigationEngine`）+ 独立确定性策略控制器 |
 | 通道与运营能力 | 飞书通道、巡检调度、评测靶场 | 无，仅 REST API 与 Vue3 工作台 |
-| 工具规模 | 27 项工具 | 7 项（5 项只读观测 + 2 项副作用） |
-| 代码与测试规模 | 约 300 个 Python 文件、134 个测试 | `app/` 下 30 个模块、138 个测试用例 |
+| 工具规模 | 27 项工具 | 9 项（7 项只读观测 + 2 项副作用） |
+| 代码与测试规模 | 约 300 个 Python 文件、134 个测试 | `app/` 下 31 个模块、157 个测试用例 |
 | 部署形态 | Docker 编排、systemd 生产加固 | 单进程 FastAPI + 独立 worker 脚本，venv 直接运行 |
 
 「明确不做」清单（见 `docs/specs/2026-10-14-core-loop-spec.md`）：pgvector 知识库、5 角色多 Agent 编排、飞书通道、巡检调度、评测靶场、Docker 编排、systemd 生产加固。

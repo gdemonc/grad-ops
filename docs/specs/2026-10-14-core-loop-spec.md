@@ -49,9 +49,11 @@
 | R3 | 高风险副作用 | 人工审批 + 受限身份 + 路径边界 |
 | R4 | 危险/越权 | 直接拒绝，不进入工具执行 |
 
-## 工具清单（7 项）
+## 工具清单（9 项）
 
-只读（5）：`list_listening_ports`、`list_processes`、`disk_usage`、`read_service_log`、`check_service_health`
+只读（7）：`list_listening_ports`、`list_processes`、`disk_usage`、`read_service_log`、`check_service_health`、`list_pods`、`get_pod_logs`
+
+K8s 只读工具受命名空间白名单约束（`GRADOPS_K8S_NAMESPACES`，默认仅 `default`）。
 
 副作用（2）：`backup_log_file`、`rotate_log_file`
 

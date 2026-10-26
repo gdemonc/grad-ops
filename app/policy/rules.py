@@ -12,6 +12,8 @@ OBSERVATION_TOOLS = {
     "disk_usage",
     "read_service_log",
     "check_service_health",
+    "list_pods",
+    "get_pod_logs",
 }
 
 RISK_DECISION = {

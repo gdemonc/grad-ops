@@ -10,13 +10,14 @@
 python -m pytest --cov=app --cov-report=term
 ```
 
-说明：`pyproject.toml` 的 `addopts` 已包含 `-q`；若再叠加一个 `-q`（即 `python -m pytest -q --cov=app --cov-report=term`）会变成 `-qq`，pytest 将省略末尾的 `137 passed, 1 skipped` 汇总行，测试与覆盖数据完全相同。
+说明：`pyproject.toml` 的 `addopts` 已包含 `-q`；若再叠加一个 `-q`（即 `python -m pytest -q --cov=app --cov-report=term`）会变成 `-qq`，pytest 将省略末尾的 `156 passed, 1 skipped` 汇总行，测试与覆盖数据完全相同。
 
 终端输出（原样粘贴）：
 
 ```text
-..........................................s............................. [ 52%]
-..................................................................       [100%]
+..........................................s............................. [ 45%]
+........................................................................ [ 91%]
+.............                                                            [100%]
 =============================== tests coverage ================================
 _______________ coverage: platform win32, python 3.11.2-final-0 _______________
 
@@ -47,18 +48,19 @@ app\policy\rules.py           10      0   100%
 app\queue.py                  78      0   100%
 app\tools\__init__.py          3      0   100%
 app\tools\base.py             16      0   100%
+app\tools\k8s.py              91     11    88%
 app\tools\observation.py     237    102    57%
-app\tools\registry.py         30      1    97%
+app\tools\registry.py         31      1    97%
 app\tools\side_effect.py      34      2    94%
 app\verification.py           89      7    92%
 app\worker.py                157     13    92%
 ----------------------------------------------
-TOTAL                       1540    165    89%
-137 passed, 1 skipped in 3.94s
+TOTAL                       1633    176    89%
+156 passed, 1 skipped in 7.75s
 ```
 
-- 收集用例 138 个：**137 passed，1 skipped**，失败 0。
-- 总体行覆盖率 **89%**（1540 条语句，165 条未覆盖）。
+- 收集用例 157 个：**156 passed，1 skipped**，失败 0。
+- 总体行覆盖率 **89%**（1633 条语句，176 条未覆盖）。
 
 ## 用例分布表
 
@@ -75,13 +77,14 @@ TOTAL                       1540    165    89%
 | tests/test_grounding.py | 8 |
 | tests/test_health.py | 1 |
 | tests/test_investigation.py | 5 |
+| tests/test_k8s_tools.py | 19 |
 | tests/test_llm_client.py | 6 |
 | tests/test_models.py | 5 |
 | tests/test_observation_tools.py | 14 |
 | tests/test_policy_controller.py | 14 |
 | tests/test_queue_worker.py | 13 |
 | tests/test_verification.py | 7 |
-| **合计** | **138** |
+| **合计** | **157** |
 
 备注：`test_policy_controller.py` 由 1 个函数经 `@pytest.mark.parametrize` 展开为 14 个用例；`test_boundary.py`、`test_observation_tools.py` 中也含参数化用例，故用例数多于函数数。
 
