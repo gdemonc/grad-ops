@@ -1,127 +1,129 @@
-# Grad-Ops 系统架构（毕业设计论文素材）
+# Grad-Ops 架构（Go + Linux）
 
-## 系统概述
+> 当前目标架构：Go 后端、Linux 唯一支持平台、SQLite 持久化、Vue 3 前端沿用。  
+> 本文取代早期 Python 主控架构作为新实现的设计基线；旧实现仅用于行为参考和历史测试基线。
 
-Grad-Ops 是一个**证据约束型自主运维控制平面**的毕业项目版：运维人员以自然语言提交请求，系统经请求禁止模式扫描、只读工具取证、LLM 有界调查、结论与证据绑定（Grounding）、确定性策略校验、人工审批、受限执行、独立恢复验证直至 SHA-256 哈希审计链封存，形成完整闭环。核心安全主张是「模型只负责理解与提议，无权自授」——动作能否执行由 `app/policy/` 下与任何 LLM 代码零耦合的确定性规则表决定，执行器按契约摘要、一次性审批令牌、运行身份、路径边界、工具白名单、禁止模式六道闸门顺序放行，验证器必须以全新的只读回读重新确认状态（复用调查证据即视为验证无效）。技术栈为 Python 3.10+ / FastAPI / SQLAlchemy 2.0 + SQLite / httpx / Vue 3 + Vite + Arco Design，单文件数据库零外部依赖，开发机为 Windows，目标运行环境为 Linux。
+## 1. 系统定位
 
-## 总体架构
+Grad-Ops 是一个证据约束型 Linux 运维 Agent 与控制平面。Agent 可以根据自然语言目标动态生成并组合 Linux Shell 命令和脚本，通过实时 Evidence 逐步调查。系统提供真实 Shell 表达力，但不把模型输出视为可信代码：所有提案均经过 AST 分析、确定性风险策略、必要审批、隔离执行、独立验证与审计。
 
-```mermaid
-flowchart TD
-    User["运维人员 / CLI"] -->|"自然语言请求"| API["FastAPI 应用 /api"]
-    FE["Vue3 工作台"] -->|"axios 请求 /api"| API
-    API -->|"POST /api/tasks 入队"| QUEUE["TaskQueue 租约队列 SQLite"]
-    QUEUE -->|"claim_next 原子认领"| WORKER["Worker 状态机主循环"]
-    WORKER --> SCAN["请求禁止模式扫描 scan_forbidden"]
-    SCAN -->|"命中 rm -rf / 等"| REJ["REJECTED 工具调用数为 0"]
-    SCAN -->|"未命中"| INV["InvestigationEngine LLM + 7 项只读工具"]
-    INV --> EVID[("Evidence 证据表")]
-    INV --> GND["Grounding 结论绑定证据"]
-    GND --> POL{"PolicyController 确定性策略"}
-    POL -->|"ALLOW_AUTO 只读 R0"| SEAL["SEALED 封存"]
-    POL -->|"ALLOW_AUTO 副作用白名单自动批准"| EXEC["Executor 受限执行 六道闸门"]
-    POL -->|"NEEDS_APPROVAL R1/R2/R3"| APPR["Approval 人工审批"]
-    POL -->|"DENY R4 或越界或缺证据"| REJ
-    APPR -->|"批准签发一次性令牌并恢复入队"| EXEC
-    APPR -->|"拒绝"| REJ
-    EXEC --> VER["Verification 独立验证回读状态"]
-    VER -->|"验证项全部通过"| SEAL
-    VER -->|"未通过"| ROLL["ROLLED_BACK 回滚恢复"]
-    WORKER -.->|"各阶段追加事件"| AUDIT["AuditLog SHA-256 哈希链"]
-    EXEC -.-> AUDIT
-    VER -.-> AUDIT
-    AUDIT -.->|"GET /api/audit/trace/verify"| API
+## 2. 逻辑架构
+
+```text
+Vue 3 工作台
+    │ HTTPS / JSON
+    ▼
+Go API ─────── Auth / Validation / Rate limits
+    │
+    ▼
+Task Service + Durable Worker
+    ├── Agent Loop → LLM Client → Structured Command Proposal
+    ├── Command Parser / Normalizer → Linux Command Adapter
+    ├── Evidence Store → Grounding
+    ├── Proposal → Action Contract → Deterministic Policy (R0-R4)
+    ├── Approval Service
+    ├── Executor → Linux Side-effect Tools
+    ├── Independent Verifier → Recovery
+    └── Audit Chain
+             │
+             ▼
+          SQLite
 ```
 
-说明：
+API 不直接执行系统操作。LLM 只参与有限调查和提出结构化建议，不参与授权决策。所有副作用只能从 Executor 唯一入口触发。
 
-- 用户与前端只经 `FastAPI /api` 交互，任务由 `TaskQueue` 落库，独立 Worker 进程（`scripts/worker.py`）以租约方式认领并按状态机推进。
-- LLM 仅出现在调查环节（`app/llm/`），且只能被授予 7 项只读工具；策略、审批、执行、验证四个环节完全不依赖模型输出。
-- 审计链是旁路而非事后补记：每个阶段都通过 `AuditLog.append` 写入带 `prev_hash` 的事件。
+### 2.1 模块边界补充
 
-## 模块表
+LLM 是规划与理解模块，不是控制中心：它可以根据任务动态生成结构化 Linux 命令提案，并依据真实执行结果决定下一步；它不持有执行权限，也不能授权动作、决定风险等级或直接执行命令。命令解析、规范化、Policy、Approval 与 Executor 均由确定性代码负责。模型 Provider 可替换，不能改变核心安全执行链。
 
-| 文件路径 | 职责 | 关键类 / 函数 |
-| --- | --- | --- |
-| `app/main.py` | FastAPI 应用工厂，挂载任务、审批、审计路由与健康检查 | `build_app()` |
-| `app/config.py` | pydantic-settings 配置（`.env` + `GRADOPS_` 前缀），LLM、执行器、调查上限参数 | `Settings`、`settings` |
-| `app/db.py` | SQLAlchemy 2.0 引擎、会话工厂、依赖注入与建表 | `Base`、`engine`、`SessionLocal`、`get_session`、`init_db` |
-| `app/enums.py` | 任务状态、风险等级、提案状态、作业状态四组枚举 | `TaskStatus`、`RiskLevel`、`ProposalStatus`、`JobStatus` |
-| `app/models.py` | 8 张表的 ORM 模型与 UTC 时间戳、trace_id 生成 | `Task`、`TaskJob`、`Evidence`、`ActionProposal`、`Approval`、`ExecutionRecord`、`VerificationRecord`、`AuditEvent`、`utcnow` |
-| `app/audit.py` | SHA-256 哈希链追加与逐条重算校验 | `AuditLog.append`、`AuditLog.verify_chain`、`stable_hash` |
-| `app/contract.py` | 动作契约构建、摘要绑定与防篡改比对 | `build_contract`、`assert_contract_matches`、`copy_contract`、`ContractTampered` |
-| `app/queue.py` | SQLite 租约队列：入队、原子认领、心跳、失败与重试 | `TaskQueue.enqueue`、`claim_next`、`heartbeat`、`mark_failed`、`JobStateError` |
-| `app/worker.py` | 任务状态机主循环：扫描 → 调查 → 策略 → 审批/执行 → 验证 | `Worker.run_once`、`_investigate`、`_handle_proposal`、`_resume`、`_execute_and_verify` |
-| `app/investigation.py` | 有界迭代 LLM 调查循环，只读工具取证，拒绝非只读请求 | `InvestigationEngine.run`、`InvestigationResult` |
-| `app/grounding.py` | 结论与证据绑定校验，丢弃引用不存在证据的结论 | `bind_claims_to_evidence`、`apply_grounding`、`GroundingResult` |
-| `app/executor.py` | 受限执行器与执行前六道闸门，审批令牌签发与一次性消费 | `execute_approved`、`issue_approval_token`、`verify_approval_token`、`ExecutionDenied` |
-| `app/verification.py` | 独立恢复验证（禁复用调查证据）与失败回滚 | `verify_recovery`、`rollback_backup`、`VerificationIndependenceError` |
-| `app/platform.py` | Windows / Linux 命令执行适配：超时、编码、返回结构统一 | `run_command`、`run_powershell`、`CommandResult` |
-| `app/policy/boundary.py` | 路径正斜杠小写规范化与「保护表 + 允许表」双闸门判定 | `authorize_path`、`BoundaryViolation`、`ALLOWED_PREFIXES`、`PROTECTED_PREFIXES` |
-| `app/policy/rules.py` | 风险决策表、副作用工具白名单、危险模式正则 | `RISK_DECISION`、`SIDE_EFFECT_WHITELIST`、`scan_forbidden` |
-| `app/policy/controller.py` | 确定性策略控制器，按固定顺序裁决且不 import 任何模型代码 | `PolicyController.evaluate`、`PolicyDecision` |
-| `app/llm/client.py` | OpenAI 兼容客户端，mock / live 双模式、重试与 JSON 解析 | `LLMClient.complete_json`、`LLMUnavailable`、`LLMFormatError` |
-| `app/tools/base.py` | 工具规格数据类与工具异常 | `ToolSpec`、`ToolError` |
-| `app/tools/observation.py` | 5 项主机只读观测工具及 Linux/Windows 双平台解析 | `list_listening_ports`、`list_processes`、`disk_usage`、`read_service_log`、`check_service_health` |
-| `app/tools/k8s.py` | 2 项 K8s 只读工具，受命名空间白名单约束 | `list_pods`、`get_pod_logs` |
-| `app/tools/side_effect.py` | 2 项副作用工具处理器 | `backup_log_file`、`rotate_log_file`、`register_side_effect_tools` |
-| `app/tools/registry.py` | 工具注册表，按只读 / 副作用分组查询 | `ToolRegistry`、`build_registry` |
-| `app/api/tasks.py` | 任务提交、列表、详情与审计时间线路由 | `create_task`、`list_tasks`、`get_task`、`get_task_timeline` |
-| `app/api/approvals.py` | 审批队列、批准 / 拒绝、手动驱动一次队列 | `approve`、`reject`、`list_approvals`、`run_queue` |
-| `app/api/audit.py` | 哈希链校验与运行时安全报告 | `verify_trace`、`safety_report` |
-| `app/api/__init__.py` | 路由子包声明 | — |
+Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现本地 Linux 工具；MCP/Kubernetes 作为后续 Adapter，不进入首期运行依赖。详见 [Tool 层安全与 Adapter 扩展设计](design/tool-layer-and-adapters.md)。
 
-辅助入口：`scripts/worker.py`（独立 Worker 进程）、`scripts/run_dev.ps1` / `scripts/run_dev.sh`（开发启动 uvicorn）。
+## 3. Go 包职责与依赖规则
 
-## 数据模型（8 张表）
+参见 `docs/specs/2026-10-26-go-linux-core-spec.md` 的目录结构。核心约束：
 
-| 表 | 关键字段 | 说明 |
-| --- | --- | --- |
-| `tasks` | `id`、`trace_id`（唯一索引）、`request_text`、`source`、`status`、`summary`、`created_at`、`updated_at` | 任务主体；`trace_id` 是审计链与时间线的串联键 |
-| `task_jobs` | `task_id`、`status`、`lease_owner`、`lease_expires_at`、`attempt_count`、`last_error`、`available_at` | 队列作业；租约字段支撑互斥认领与过期重领 |
-| `evidences` | `task_id`、`tool_call_id`、`kind`、`summary`、`payload_json`、`content_hash` | 只读工具取证结果；`content_hash` 对结果做稳定哈希 |
-| `action_proposals` | `task_id`、`tool_name`、`input_json`、`risk_level`、`rationale`、`preconditions_json`、`postconditions_json`、`rollback_json`、`policy_ref`、`contract_digest`、`status` | LLM 处置提议，也是动作契约的载体 |
-| `approvals` | `proposal_id`、`token_hash`、`status`（PENDING / APPROVED / REJECTED / CONSUMED）、`decided_by`、`decided_at`、`comment` | 人工审批记录；只存令牌哈希，消费后置 `CONSUMED` |
-| `execution_records` | `proposal_id`、`ok`、`exit_code`、`stdout`、`stderr`、`duration_ms`、`executed_at` | 受限执行结果 |
-| `verification_records` | `task_id`、`proposal_id`、`checks_json`、`passed`、`note`、`verified_at` | 独立验证结论，`checks_json` 记录逐项检查明细 |
-| `audit_events` | `trace_id`、`seq`、`stage`、`event_type`、`message`、`payload_json`、`prev_hash`、`payload_hash`、`event_hash`；`(trace_id, seq)` 唯一索引 | 哈希链事件：`event_hash = H(prev_hash, payload_hash)` |
+- `domain` 只定义领域对象、枚举、错误和状态迁移。
+- `policy` 是确定性纯逻辑，不导入 `llm`、`api`、`executor`。
+- `investigation` 驱动动态命令调查；LLM 可提交 Shell 提案，但不能直接运行进程。
+- `executor` 是唯一执行入口，执行前重新检查 AST 契约、授权、身份、隔离配置和资源边界。
+- `command` 使用 Shell Parser 解析 AST、规范化脚本并分析命令、参数、重定向和控制流。
+- `linux` 提供 Linux Shell Adapter 与隔离执行原语；它不决定业务审批，也不直接修改任务状态。
+- `store` 负责 SQLite 实现；业务服务依赖窄接口，数据库事务边界由调用方明确控制。
+- `verifier` 只读取执行后状态，不能复用调查阶段证据作为验证结论。
+- `audit` 追加事件并验证哈希链。审计完整性不等同于对主机 root 或数据库管理员的防篡改保证。
 
-## 任务状态机
+## 4. Linux 执行模型
 
-```mermaid
-stateDiagram-v2
-    [*] --> QUEUED
-    QUEUED --> INVESTIGATING: worker 认领且请求未命中禁止模式
-    QUEUED --> REJECTED: 请求命中禁止模式 工具调用数为 0
-    INVESTIGATING --> REJECTED: 策略 DENY 或人工拒绝
-    INVESTIGATING --> SEALED: 只读调查完成 无副作用提议
-    INVESTIGATING --> EXECUTING: 副作用白名单 ALLOW_AUTO 自动批准
-    INVESTIGATING --> AWAITING_APPROVAL: NEEDS_APPROVAL 提案挂起
-    AWAITING_APPROVAL --> EXECUTING: 人工批准并恢复入队
-    AWAITING_APPROVAL --> REJECTED: 人工拒绝审批
-    EXECUTING --> VERIFYING: 执行完成进入独立验证
-    VERIFYING --> SEALED: 验证项全部通过
-    VERIFYING --> ROLLED_BACK: 验证失败触发回滚
-    QUEUED --> FAILED: worker 处理异常
-    INVESTIGATING --> FAILED: worker 处理异常
-    EXECUTING --> FAILED: worker 处理异常
-    SEALED --> [*]
-    REJECTED --> [*]
-    ROLLED_BACK --> [*]
-    FAILED --> [*]
-```
+支持平台仅为 Linux。首期明确选择 Ubuntu LTS 作为开发与 CI 基线，其他发行版仅在工具行为验证后加入支持列表。
 
-两条拒绝入口：一是请求级扫描（`scan_forbidden`）在**零工具调用**下直接 `QUEUED → REJECTED`；二是策略级 `DENY`（R4、工具不在白名单、路径越界、缺少前置证据）或人工拒绝审批，使任务进入 `REJECTED`。
+Agent 可以提交动态 Shell 脚本提案，不要求将每一种运维动作预先封装为固定业务工具。目标能力覆盖 Bash 的常用表达式，包括任意命令组合、管道、重定向、条件控制、命令替换、变量展开、子 Shell、循环、函数和多行脚本；但语法支持按阶段开放，不能把尚未分析的语法当作安全语法。服务端使用 Shell Parser（建议 `mvdan.cc/sh`）解析 AST，并递归分析所有命令、参数、管道阶段、条件分支、重定向目标、子 Shell、命令替换和动态展开。动态生成的命令名、`eval`、`bash -c`、`source`、`xargs`、`find -exec`、`awk system()` 等间接执行路径，若无法确定第二阶段实际执行内容，不能自动判为 R0；应拒绝自动执行、要求更强隔离或转人工审批。Policy 根据完整 AST、可执行文件身份、命令/参数语义、目标资源、身份和环境计算 R0-R4。生产执行优先使用系统 Bash，以保留真实 Shell 语义；`mvdan.cc/sh` 的解释器可用于 PoC，不应未经兼容性验证直接替代 Bash。执行在专用非 root 账号及受限 Linux 执行环境中进行，设置时间、CPU、内存、PID、文件大小、输出和调用预算。AST 解析本身不是沙箱。
 
-## 与原 OpsCouncil 的差异
+文件副作用必须对实际使用的文件对象实施边界检查，而不是只对字符串路径做检查。对符号链接、路径替换和 TOCTOU 风险，采用 dirfd/openat 系列安全原语；如果安全原语无法满足约束，拒绝执行。
 
-| 维度 | 原 OpsCouncil | Grad-Ops 毕业项目版 |
-| --- | --- | --- |
-| 存储 | PostgreSQL + pgvector 知识库 | SQLite（SQLAlchemy 2.0），单文件、零外部依赖 |
-| 智能体编排 | 5 角色多 Agent 协作 | 单一调查 Agent（`InvestigationEngine`）+ 独立确定性策略控制器 |
-| 通道与运营能力 | 飞书通道、巡检调度、评测靶场 | 无，仅 REST API 与 Vue3 工作台 |
-| 工具规模 | 27 项工具 | 9 项（7 项只读观测 + 2 项副作用） |
-| 代码与测试规模 | 约 300 个 Python 文件、134 个测试 | `app/` 下 31 个模块、157 个测试用例 |
-| 部署形态 | Docker 编排、systemd 生产加固 | 单进程 FastAPI + 独立 worker 脚本，venv 直接运行 |
+## 5. 任务状态与事务\n\n状态转换、UNKNOWN 结果、Worker 租约与崩溃恢复的详细规划见 [任务生命周期与故障恢复设计](design/task-lifecycle-and-recovery.md)。
 
-「明确不做」清单（见 `docs/specs/2026-10-14-core-loop-spec.md`）：pgvector 知识库、5 角色多 Agent 编排、飞书通道、巡检调度、评测靶场、Docker 编排、systemd 生产加固。
+任务状态机、审批消费、队列认领和审计写入必须有单一实现入口。状态变化与对应审计事件应尽可能在同一 SQLite 事务中提交。队列使用租约和明确的重试策略；发生崩溃时，先恢复任务状态并判断副作用是否已经发生，不可简单地重复执行不具幂等性的动作。
+
+首期采用单机 SQLite。多实例 Worker、跨主机分布式协调和高可用均不是首期目标。
+
+## 6. 安全边界
+
+安全控制按层叠加：
+
+1. API 身份认证与输入校验；
+2. 动态命令解析、可执行能力约束和调用预算；
+3. Grounding 证据绑定；
+4. 确定性风险与策略判定；
+5. 动作契约摘要校验；
+6. 一次性审批凭证；
+7. Linux 运行身份、路径和参数边界；
+8. 独立验证与显式恢复；
+9. 追加式审计与链完整性校验。
+
+任一安全检查无法完成时采用 fail-closed：拒绝动作，并留下可诊断事件。
+
+## 7. 前端与 API
+
+现有 Vue 3 前端继续使用 REST/JSON。API DTO 与领域模型分离，避免将数据库结构直接暴露给前端。主要资源包括：
+
+- `/api/tasks`：创建、查询任务；
+- `/api/tasks/{id}/timeline`：审计时间线；
+- `/api/approvals/{id}/approve` 与 `/reject`：审批操作；
+- `/api/health`：健康状态。
+
+具体路径与响应 schema 以实现前的 API 契约文档为准。API 不提供任意命令执行端点。
+
+## 8. 部署\n\n敏感数据分类、脱敏、日志/Evidence/History/Audit 分工、保留与清理要求见 [敏感数据与日志安全设计](design/data-security-and-logging.md)。
+
+- 单个 Go 服务二进制，配置从环境变量或受权限保护的配置文件读取。
+- SQLite 数据库和审计相关文件位于服务专用目录，权限最小化。
+- systemd 管理服务；服务默认使用专用非 root 账号。
+- 日志不输出密钥、审批原始令牌或未经处理的敏感日志内容。
+- 提供 Linux shell 脚本；不再提供 PowerShell 和 Windows 启动流程。
+
+## 8.1 Memory、Knowledge 与实时 Evidence
+
+三者职责必须分开，不能把历史记忆当作当前系统状态，也不能把静态文档当作实时观测。
+
+- **Task History（任务历史）**：记录任务请求、调查步骤、工具调用、Evidence 引用、审批、执行、验证和审计事件。它是可追溯的事实记录，不等同于模型自由生成的摘要。
+- **Memory（记忆）**：从有来源的历史记录中整理出可复用的结构化信息，例如用户明确表达的运维偏好、主机环境事实、历史任务结论和经过验证的排障经验。每条记忆应保留来源、时间、置信度和适用范围；可能变化的环境信息应设置有效期或重新验证标记。
+- **Knowledge（知识库）**：人工维护的 Markdown 运维手册、Runbook、故障处理规范和项目文档。它提供通用操作知识，不声称描述主机此刻的状态。
+- **Live Evidence（实时证据）**：由当前任务的只读工具实时采集，例如当前磁盘空间、进程、服务状态和日志。凡是涉及“现在”的判断，都必须以本次任务的实时 Evidence 为依据。
+
+### 首期实现边界
+
+首期先把 Task History 做完整：任务记录、工具调用结果、Evidence 与审批/执行/验证事件均持久化到 SQLite，并能在任务详情中回看。Memory 与 Knowledge 先定义数据边界和接口，不让它们阻塞单机闭环。
+
+后续增加轻量 Memory 时，优先使用 SQLite 结构化表和关键词检索；Knowledge 先以仓库内或配置目录中的 Markdown 文档为来源，按标题、标签和关键词检索。暂不引入 Embedding 服务或独立向量数据库。记忆候选应来自明确的历史来源，经规则校验或用户确认后再保存，不允许模型把猜测直接写成事实。
+
+任何 Memory/Knowledge 内容都不能直接授权操作，也不能替代当前 Evidence。检索到的内容只能作为上下文，仍需经过工具观测、Grounding、Policy、Approval 和 Executor 的既定安全流程。
+
+## 9. 暂不实现的扩展
+
+- 未经 AST/语义分析、确定性策略和隔离执行的 Shell/脚本；
+- 多主机 Agent、mTLS 注册与远程命令协议；
+- 主控高可用、分布式数据库、分布式事务；
+- Kubernetes Operator；
+- 自动升级；
+- 任意宿主机提权、任意 sudo，以及绕过策略或沙箱的 Shell/脚本执行；
+- Windows/macOS 适配。

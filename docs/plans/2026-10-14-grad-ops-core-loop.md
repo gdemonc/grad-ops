@@ -1,3 +1,5 @@
+> **历史文档说明（Go + Linux 重构分支）**：本文是旧 Python/FastAPI 实现的历史实施计划，包含 Windows 开发路径与 Python 模块结构，不是 Go 版任务清单。新实现请遵循 `docs/specs/2026-10-26-go-linux-core-spec.md` 和 `docs/plans/2026-10-26-go-linux-refactor.md`。仅将本文用于理解既有闭环行为，不应照搬其文件路径或技术栈。
+
 # Grad-Ops 核心闭环 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
