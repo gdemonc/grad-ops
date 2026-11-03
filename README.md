@@ -27,7 +27,8 @@ Grad-Ops 是具备动态 Shell 能力、但不授予模型任意主机权限的 
 | [Go + Linux 核心规格](docs/specs/2026-10-26-go-linux-core-spec.md) | 目标、边界、职责、状态机、数据模型与验收条件 |
 | [架构设计](docs/architecture.md) | Go 包职责、依赖规则、Memory/Knowledge、Linux 执行模型和部署边界 |
 | [记忆与知识库设计](docs/design/memory-and-knowledge.md) | Task History、Memory、Knowledge 与实时 Evidence 的边界及分阶段实现方案 |
-| [威胁模型](docs/threat-model.md) | 提示注入、越权、审批重放、文件系统竞态、Worker 崩溃等威胁 |
+| [威胁模型](docs/threat-model.md) | 提示注入、Shell 动态执行、越权、审批重放、文件系统竞态等威胁 |
+| [Tool 层与动态 Shell 设计](docs/design/tool-layer-and-adapters.md) | Shell AST、能力策略、动作契约、隔离执行与未来 Adapter 边界 |
 | [Go + Linux 重构计划](docs/plans/2026-10-26-go-linux-refactor.md) | 分阶段实施与每阶段验收标准 |
 | [多主机 Go Agent 旧方案](docs/plans/2026-10-26-multi-host-go-agent.md) | 未来扩展参考；首期不实现 |
 | [核心闭环旧实施计划](docs/plans/2026-10-14-grad-ops-core-loop.md) | Python 版本的历史实现参考 |
