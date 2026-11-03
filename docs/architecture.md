@@ -17,9 +17,10 @@ Go API ─────── Auth / Validation / Rate limits
     │
     ▼
 Task Service + Durable Worker
-    ├── Investigation → LLM Client → Read-only Tool Registry
+    ├── Agent Loop → LLM Client → Structured Command Proposal
+    ├── Command Parser / Normalizer → Linux Command Adapter
     ├── Evidence Store → Grounding
-    ├── Proposal → Action Contract → Deterministic Policy
+    ├── Proposal → Action Contract → Deterministic Policy (R0-R4)
     ├── Approval Service
     ├── Executor → Linux Side-effect Tools
     ├── Independent Verifier → Recovery
@@ -43,9 +44,10 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 
 - `domain` 只定义领域对象、枚举、错误和状态迁移。
 - `policy` 是确定性纯逻辑，不导入 `llm`、`api`、`executor`。
-- `investigation` 只能使用只读工具接口；副作用工具不应出现在模型可见的工具列表中。
+- `investigation` 驱动动态只读命令调查；LLM 只能提交结构化提案，不能直接运行进程。
 - `executor` 是唯一副作用入口，执行前重新检查契约、授权、身份、参数和资源边界。
-- `linux` 实现系统工具；它不决定业务审批，也不直接修改任务状态。
+- `command` 负责解析、规范化命令及参数，校验可执行能力、工作目录、环境和资源范围。
+- `linux` 提供 Linux Command Adapter 与安全执行原语；它不决定业务审批，也不直接修改任务状态。
 - `store` 负责 SQLite 实现；业务服务依赖窄接口，数据库事务边界由调用方明确控制。
 - `verifier` 只读取执行后状态，不能复用调查阶段证据作为验证结论。
 - `audit` 追加事件并验证哈希链。审计完整性不等同于对主机 root 或数据库管理员的防篡改保证。
@@ -54,13 +56,7 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 
 支持平台仅为 Linux。首期明确选择 Ubuntu LTS 作为开发与 CI 基线，其他发行版仅在工具行为验证后加入支持列表。
 
-Agent 可以动态生成命令，但不能提交可直接执行的 Shell 字符串。命令先转换为结构化契约：可信可执行文件标识、`argv` 数组、工作目录、受控环境、目标资源、运行身份、超时与输出预算。执行使用 `exec.CommandContext` 和独立参数数组，不经过 Shell 解释器。Policy 根据实际命令语义和参数计算 R0-R4。每个工具定义：
-
-- 固定工具名与可执行文件；
-- 输入参数 schema 与允许值；
-- 只读/副作用标记、风险基线；
-- 超时、输出字节上限和环境变量；
-- 输出解析器、错误分类和测试夹具。
+Agent 可以动态生成命令，但不能提交可直接执行的 Shell 字符串。命令先转换为结构化契约：可信可执行文件标识、`argv` 数组、工作目录、受控环境、目标资源、运行身份、超时与输出预算。执行使用 `exec.CommandContext` 和独立参数数组，不经过 Shell 解释器。Policy 根据实际命令语义和参数计算 R0-R4。服务端维护可信可执行文件能力、参数规则、操作语义、目标资源范围和运行身份约束；不要求每种运维动作都预先封装成业务工具。每次命令调用均设置超时、输出字节上限、受控环境和调用预算。
 
 文件副作用必须对实际使用的文件对象实施边界检查，而不是只对字符串路径做检查。对符号链接、路径替换和 TOCTOU 风险，采用 dirfd/openat 系列安全原语；如果安全原语无法满足约束，拒绝执行。
 
@@ -75,7 +71,7 @@ Agent 可以动态生成命令，但不能提交可直接执行的 Shell 字符�
 安全控制按层叠加：
 
 1. API 身份认证与输入校验；
-2. 只读调查工具注册表和调用预算；
+2. 动态命令解析、可执行能力约束和调用预算；
 3. Grounding 证据绑定；
 4. 确定性风险与策略判定；
 5. 动作契约摘要校验；
