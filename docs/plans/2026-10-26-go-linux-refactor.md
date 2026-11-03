@@ -7,7 +7,7 @@
 
 - [ ] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
 - [ ] 确定首期 Ubuntu LTS 版本与支持的 Go 版本。
-- [ ] 冻结任务状态机、错误分类、风险规则、动作契约字段。\n- [ ] 评审任务生命周期与故障恢复设计：\`docs/design/task-lifecycle-and-recovery.md\`。\n- [ ] 评审 Tool 层安全与 Adapter 抽象：\`docs/design/tool-layer-and-adapters.md\`。\n- [ ] 评审敏感数据与日志安全要求：\`docs/design/data-security-and-logging.md\`。
+- [ ] 冻结任务状态机、错误分类、R0-R4 风险规则、结构化动态命令契约字段。\n- [ ] 评审任务生命周期与故障恢复设计：\`docs/design/task-lifecycle-and-recovery.md\`。\n- [ ] 评审 Tool 层安全与 Adapter 抽象：\`docs/design/tool-layer-and-adapters.md\`。\n- [ ] 评审敏感数据与日志安全要求：\`docs/design/data-security-and-logging.md\`。
 - [ ] 定义规范化 JSON 和 SHA-256 摘要测试向量。
 - [ ] 定义 API request/response DTO 与数据库迁移策略。
 - [ ] 将旧文档中 Windows/PowerShell/跨平台要求标为历史设计或删除。
@@ -29,19 +29,22 @@
 
 ## Phase 2：Linux 只读工具与调查
 
-- [ ] 注册 `disk_usage`、`list_processes`、`list_listening_ports`、`check_service_health`、`read_service_log`。
-- [ ] 使用固定可执行文件和参数数组，禁止 `sh -c`。
-- [ ] 工具 schema、超时、输出上限、错误分类和解析测试。\n- [ ] 实现面向 Linux 本地工具的统一 Tool Registry / Tool Interface；不实现 MCP Client。
+- [ ] 实现结构化动态命令提案：可执行文件标识、argv、工作目录、环境白名单、目标资源、运行身份、超时和输出预算。
+- [ ] 实现 Linux Command Adapter，使用可信可执行文件与参数数组调用 `exec.CommandContext`，不经过 Shell 解释器。
+- [ ] 不为每一种运维动作预先封装业务工具；服务端维护可执行能力、参数语义和资源范围约束。
+- [ ] 实现命令解析/规范化、只读语义判定、R0-R4 确定性风险策略及 fail-closed 规则。
+- [ ] 命令超时、输出上限、环境变量、调用轮次和资源预算测试。
+- [ ] 实现统一 Command/Tool Adapter 接口；不实现 MCP Client。
 - [ ] OpenAI 兼容 LLM client，支持 mock provider。
 - [ ] 调查轮次、工具调用次数、总耗时和输出 token 预算。
 - [ ] Grounding 只接受真实 evidence ID。
 - [ ] 对提示注入、未知工具、畸形 JSON 和预算耗尽编写对抗测试。
 
-**验收：** 一条只读任务可在 Linux 采集证据、生成绑定证据的结论并进入 `SEALED`；调查路径不能触发任何副作用。
+**验收：** Agent 能根据调查目标动态组合多条 R0 只读命令，依据每步真实结果继续规划；调查路径不能触发任何副作用。
 
 ## Phase 3：策略、契约与审批
 
-- [ ] 工具登记风险与参数驱动的确定性风险计算。
+- [ ] 基于可执行文件、命令/参数语义、目标资源、运行身份和环境的确定性 R0-R4 风险计算。
 - [ ] 动作契约规范化、摘要计算和执行前比对。
 - [ ] 审批凭证只存 hash，设置短时效并绑定具体契约。
 - [ ] 原子消费凭证，测试重复提交和并发双消费。
@@ -55,7 +58,7 @@
 
 - [ ] 实现唯一副作用执行入口。
 - [ ] Linux 文件操作加入 symlink、TOCTOU 和路径边界防护。
-- [ ] 首期仅启用经过评审的低数量副作用工具，例如日志备份与轮转。
+- [ ] 首期仅启用经过评审的受控副作用命令子集，例如日志备份与轮转；默认不开放任意 Shell。
 - [ ] 执行结果和实际参数摘要写入 execution record。
 - [ ] 验证阶段使用新的只读观测，禁止复用调查证据。
 - [ ] 显式定义每种副作用的恢复动作和恢复后验证。
@@ -91,7 +94,7 @@ Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.m
 
 ## 暂缓：MCP 与 Kubernetes
 
-首期不实现 MCP Client、Kubernetes 工具或集群操作。单机闭环稳定后，才评估通过 Tool Adapter 接入外部工具。未来 Kubernetes 能力应从只读操作开始，并复用统一工具注册、参数校验、策略、审批、执行、验证和审计链；不向模型开放任意 kubectl 命令。
+首期不实现 MCP Client、Kubernetes 工具或集群操作。单机闭环稳定后，才评估通过 Tool Adapter 接入外部工具。未来 Kubernetes 能力应从只读操作开始，并复用统一命令/动作契约、参数校验、策略、审批、执行、验证和审计链；不向模型开放任意 kubectl 或 Shell 命令。
 
 ## 暂缓：多主机
 
