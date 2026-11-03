@@ -7,7 +7,7 @@
 
 - [ ] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
 - [ ] 确定首期 Ubuntu LTS 版本与支持的 Go 版本。
-- [ ] 冻结任务状态机、错误分类、风险规则、动作契约字段。
+- [ ] 冻结任务状态机、错误分类、风险规则、动作契约字段。\n- [ ] 评审任务生命周期与故障恢复设计：\`docs/design/task-lifecycle-and-recovery.md\`。\n- [ ] 评审 Tool 层安全与 Adapter 抽象：\`docs/design/tool-layer-and-adapters.md\`。\n- [ ] 评审敏感数据与日志安全要求：\`docs/design/data-security-and-logging.md\`。
 - [ ] 定义规范化 JSON 和 SHA-256 摘要测试向量。
 - [ ] 定义 API request/response DTO 与数据库迁移策略。
 - [ ] 将旧文档中 Windows/PowerShell/跨平台要求标为历史设计或删除。
@@ -22,7 +22,7 @@
 - [ ] 建立 task、job、evidence、proposal、approval、execution、verification、audit 的基础模型。
 - [ ] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
 - [ ] 状态机函数与状态迁移单测。
-- [ ] Worker 任务认领、租约、超时和恢复策略。
+- [ ] Worker 任务认领、租约、超时和恢复策略；按任务生命周期设计处理 UNKNOWN，禁止不确定副作用自动重放。
 - [ ] Linux CI 执行 `go test ./...`、`go vet ./...`。
 
 **验收：** 空项目可在 Ubuntu 启动；创建任务、持久化、重启恢复与审计写入均有集成测试；任务时间线可回看关键步骤及其来源。
@@ -31,7 +31,7 @@
 
 - [ ] 注册 `disk_usage`、`list_processes`、`list_listening_ports`、`check_service_health`、`read_service_log`。
 - [ ] 使用固定可执行文件和参数数组，禁止 `sh -c`。
-- [ ] 工具 schema、超时、输出上限、错误分类和解析测试。
+- [ ] 工具 schema、超时、输出上限、错误分类和解析测试。\n- [ ] 实现面向 Linux 本地工具的统一 Tool Registry / Tool Interface；不实现 MCP Client。
 - [ ] OpenAI 兼容 LLM client，支持 mock provider。
 - [ ] 调查轮次、工具调用次数、总耗时和输出 token 预算。
 - [ ] Grounding 只接受真实 evidence ID。
@@ -80,7 +80,7 @@
 
 Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.md`。这部分不应阻塞首期单机闭环。
 
-- [ ] Task History 稳定后，再实现结构化 Memory：来源、时间、适用范围、有效期和状态。
+- [ ] 首期只允许简单、来源明确的记忆记录；Task History 是主要持久化事实来源。\n- [ ] Task History 稳定后，再实现结构化 Memory：来源、时间、适用范围、有效期和状态。
 - [ ] 为用户偏好、环境事实和已验证经验提供关键词检索。
 - [ ] 增加过期识别、冲突标记、用户纠正/撤销能力。
 - [ ] 建立 Markdown Runbook 知识库，支持标题、标签和关键词检索，并返回原文位置。
