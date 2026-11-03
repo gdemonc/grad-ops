@@ -236,6 +236,19 @@ Verifier 进行新的只读观测并检查后置条件
 7. 项目架构文档、核心规格、威胁模型、部署说明和测试报告。
 8. 可复现的演示流程：只读调查、审批拒绝、批准执行、验证失败、恢复与审计校验。
 
+## 11.1 记忆与知识能力的实施边界
+
+Memory、Knowledge 与实时 Evidence 分开设计，详细规则见[《Memory 与 Knowledge 设计》](../design/memory-and-knowledge.md)。
+
+- **首期必须完成 Task History**：持久化请求、任务状态、工具调用、Evidence 引用、审批、执行、验证和审计事件，支持按任务回看。
+- **首期不做自动记忆提炼**：先确保历史记录来源可靠，避免模型猜测被保存成事实。
+- **后续增加轻量 Memory**：使用 SQLite 保存有来源、有时间和适用范围的结构化偏好、环境事实与已验证经验；支持有效期、冲突标记和关键词检索。
+- **后续增加 Knowledge**：以 Markdown Runbook 为主，先做标题、标签和关键词检索，检索结果能够定位原文。
+- **暂不引入向量数据库或 Embedding 服务**：只有在检索效果确有瓶颈并有评估数据后再考虑。
+- Memory 和 Knowledge 不能授予执行权限，也不能替代当前任务的实时 Evidence。
+
+MCP 与 Kubernetes 是未来工具接入方向，不是首期交付项。未来接入时必须复用统一 Tool Registry、Policy、Approval、Executor、Evidence、Verification 和 Audit 流程。
+
 ## 十二、后续扩展方向
 
 只有在单机版本的安全闭环和故障恢复机制通过验收后，才考虑：
