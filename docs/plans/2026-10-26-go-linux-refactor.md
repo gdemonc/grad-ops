@@ -20,11 +20,12 @@
 - [ ] 配置、日志、HTTP server、优雅关闭、健康检查。
 - [ ] SQLite 迁移、Repository 和事务封装。
 - [ ] 建立 task、job、evidence、proposal、approval、execution、verification、audit 的基础模型。
+- [ ] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
 - [ ] 状态机函数与状态迁移单测。
 - [ ] Worker 任务认领、租约、超时和恢复策略。
 - [ ] Linux CI 执行 `go test ./...`、`go vet ./...`。
 
-**验收：** 空项目可在 Ubuntu 启动；创建任务、持久化、重启恢复与审计写入均有集成测试。
+**验收：** 空项目可在 Ubuntu 启动；创建任务、持久化、重启恢复与审计写入均有集成测试；任务时间线可回看关键步骤及其来源。
 
 ## Phase 2：Linux 只读工具与调查
 
@@ -74,6 +75,23 @@
 - [ ] 生成测试矩阵、性能测量与安全限制说明。
 
 **验收：** 在干净的 Ubuntu 环境中可按文档完成部署；全套测试结果可复现。
+
+## 后续阶段：Memory 与 Knowledge
+
+Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.md`。这部分不应阻塞首期单机闭环。
+
+- [ ] Task History 稳定后，再实现结构化 Memory：来源、时间、适用范围、有效期和状态。
+- [ ] 为用户偏好、环境事实和已验证经验提供关键词检索。
+- [ ] 增加过期识别、冲突标记、用户纠正/撤销能力。
+- [ ] 建立 Markdown Runbook 知识库，支持标题、标签和关键词检索，并返回原文位置。
+- [ ] 评估检索质量后，再决定是否需要 Embedding/向量检索；不预先引入向量数据库。
+- [ ] 记忆候选须有可追溯来源；模型猜测不能自动成为长期记忆。
+
+**验收：** Memory 与 Knowledge 的检索结果能显示来源和时间；过期环境信息不会被当作当前事实；二者均不能绕过实时 Evidence、Policy 和 Approval。
+
+## 暂缓：MCP 与 Kubernetes
+
+首期不实现 MCP Client、Kubernetes 工具或集群操作。单机闭环稳定后，才评估通过 Tool Adapter 接入外部工具。未来 Kubernetes 能力应从只读操作开始，并复用统一工具注册、参数校验、策略、审批、执行、验证和审计链；不向模型开放任意 kubectl 命令。
 
 ## 暂缓：多主机
 
