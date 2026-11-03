@@ -30,11 +30,11 @@
 ## Phase 2：Linux 只读工具与调查
 
 - [ ] 定义 Shell Proposal 与 Action Contract：脚本摘要、AST 摘要、Shell/Parser 版本、工作目录、环境白名单、身份、目标资源、隔离配置和预算。
-- [ ] 引入 Shell AST Parser（建议评估 `mvdan.cc/sh`），实现解析、规范化、节点限制和完整 AST 遍历。
-- [ ] 首期支持普通命令、管道、重定向、`;`、`&&`、`||` 和多行提案；对未支持语法节点明确拒绝。
-- [ ] 不为每一种运维动作预先封装业务工具；服务端维护可执行能力、参数语义和资源范围约束。
+- [ ] 引入 Shell AST Parser（建议评估 `mvdan.cc/sh`），实现解析、规范化、节点限制和完整 AST 遍历；评估 Bash 兼容性及版本锁定。
+- [ ] 首期支持普通命令、管道、重定向、`;`、`&&`、`||`、命令替换和多行提案；循环/函数等复杂节点按能力逐步开放，未支持语法节点明确拒绝。
+- [ ] 不为每一种运维动作预先封装业务工具；服务端维护可执行文件身份、参数语义、资源范围和副作用能力约束。
 - [ ] 实现 R0-R4 确定性风险策略，分析管道各阶段、条件分支、重定向目标和副作用组合。
-- [ ] 实现 Linux Shell Adapter 与专用非 root 执行账号；使用 systemd transient unit/cgroup 等施加资源限制，评估 AppArmor/seccomp 加固。
+- [ ] 实现 Linux Bash Adapter 与专用非 root 执行账号；优先使用 systemd transient unit/cgroup 施加资源限制，评估 Landlock、Bubblewrap、AppArmor/seccomp 等增强项，不把首期做成重型容器平台。
 - [ ] 测试超时、输出上限、环境清理、CPU/内存/PID/文件大小预算、进程组终止和调用轮次。
 - [ ] 实现统一 Command/Tool Adapter 接口；不实现 MCP Client。
 - [ ] OpenAI 兼容 LLM client，支持 mock provider。
