@@ -31,6 +31,12 @@ Task Service + Durable Worker
 
 API 不直接执行系统操作。LLM 只参与有限调查和提出结构化建议，不参与授权决策。所有副作用只能从 Executor 唯一入口触发。
 
+### 2.1 模块边界补充
+
+LLM 是规划与理解模块，不是控制中心：它输出结构化调查计划或动作建议；Schema 校验、Tool Registry、Policy、Approval 与 Executor 由确定性代码负责。LLM 不持有执行权限，也不能直接调用副作用实现。模型 Provider 可替换，不能改变核心安全执行链。
+
+Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现本地 Linux 工具；MCP/Kubernetes 作为后续 Adapter，不进入首期运行依赖。详见 [Tool 层安全与 Adapter 扩展设计](design/tool-layer-and-adapters.md)。
+
 ## 3. Go 包职责与依赖规则
 
 参见 `docs/specs/2026-10-26-go-linux-core-spec.md` 的目录结构。核心约束：
@@ -58,7 +64,7 @@ API 不直接执行系统操作。LLM 只参与有限调查和提出结构化建
 
 文件副作用必须对实际使用的文件对象实施边界检查，而不是只对字符串路径做检查。对符号链接、路径替换和 TOCTOU 风险，采用 dirfd/openat 系列安全原语；如果安全原语无法满足约束，拒绝执行。
 
-## 5. 任务状态与事务
+## 5. 任务状态与事务\n\n状态转换、UNKNOWN 结果、Worker 租约与崩溃恢复的详细规划见 [任务生命周期与故障恢复设计](design/task-lifecycle-and-recovery.md)。
 
 任务状态机、审批消费、队列认领和审计写入必须有单一实现入口。状态变化与对应审计事件应尽可能在同一 SQLite 事务中提交。队列使用租约和明确的重试策略；发生崩溃时，先恢复任务状态并判断副作用是否已经发生，不可简单地重复执行不具幂等性的动作。
 
@@ -91,7 +97,7 @@ API 不直接执行系统操作。LLM 只参与有限调查和提出结构化建
 
 具体路径与响应 schema 以实现前的 API 契约文档为准。API 不提供任意命令执行端点。
 
-## 8. 部署
+## 8. 部署\n\n敏感数据分类、脱敏、日志/Evidence/History/Audit 分工、保留与清理要求见 [敏感数据与日志安全设计](design/data-security-and-logging.md)。
 
 - 单个 Go 服务二进制，配置从环境变量或受权限保护的配置文件读取。
 - SQLite 数据库和审计相关文件位于服务专用目录，权限最小化。
