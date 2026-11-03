@@ -2,7 +2,7 @@
 
 证据约束型自主运维控制平面 · Go + Linux 重构分支
 
-> **当前分支：** `refactor/go-linux-core`  
+> **当前分支：** `refactor/go-linux-core-single-host`  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
 > **迁移状态：** 当前提交以架构、规格、威胁模型和实施计划为主；Go 后端尚未完成。现有 `app/` Python 代码是历史参考实现，不代表本分支的最终运行方式。
 
@@ -25,7 +25,8 @@ Grad-Ops 的核心不是任意 Shell Agent，而是一个将自然语言运维�
 | 文档 | 用途 |
 | --- | --- |
 | [Go + Linux 核心规格](docs/specs/2026-10-26-go-linux-core-spec.md) | 目标、边界、职责、状态机、数据模型与验收条件 |
-| [架构设计](docs/architecture.md) | Go 包职责、依赖规则、Linux 执行模型和部署边界 |
+| [架构设计](docs/architecture.md) | Go 包职责、依赖规则、Memory/Knowledge、Linux 执行模型和部署边界 |
+| [记忆与知识库设计](docs/design/memory-and-knowledge.md) | Task History、Memory、Knowledge 与实时 Evidence 的边界及分阶段实现方案 |
 | [威胁模型](docs/threat-model.md) | 提示注入、越权、审批重放、文件系统竞态、Worker 崩溃等威胁 |
 | [Go + Linux 重构计划](docs/plans/2026-10-26-go-linux-refactor.md) | 分阶段实施与每阶段验收标准 |
 | [多主机 Go Agent 旧方案](docs/plans/2026-10-26-multi-host-go-agent.md) | 未来扩展参考；首期不实现 |
@@ -46,7 +47,8 @@ Grad-Ops 的核心不是任意 Shell Agent，而是一个将自然语言运维�
 - 多主机扇出、远程 Agent、Agent 自动升级；
 - 任意 Shell、任意脚本或任意 sudo；
 - Windows/macOS 适配；
-- Kubernetes Operator、分布式事务和主控高可用。
+- MCP、Kubernetes、外部工具平台、分布式事务和主控高可用。
+- 向量数据库、Embedding 服务和复杂的长期记忆自动提取。
 
 ## 实施入口
 
