@@ -6,7 +6,7 @@
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
 > **迁移状态：** 当前提交以架构、规格、威胁模型和实施计划为主；Go 后端尚未完成。现有 `app/` Python 代码是历史参考实现，不代表本分支的最终运行方式。
 
-Grad-Ops 是具备动态 Shell 能力、但不授予模型任意主机权限的 Linux 运维 Agent 与控制平面。Agent 可以组合命令、脚本、管道、重定向和命令替换；每个提案都必须经过解析、能力策略、风险判定和隔离执行：
+Grad-Ops 是具备通用 Shell 能力、但不把主机权限交给模型的 Linux 运维 Agent 与控制平面。Agent 可动态组合 Bash 命令、脚本、管道、重定向和命令替换；Shell 是通用执行接口，不是预定义运维动作菜单。命令经策略授权后进入受限 Linux Runtime 执行：
 
 `自然语言请求 → 只读取证 → 证据绑定 → 确定性策略 → 动作契约 → 人工审批 → 受限执行 → 独立验证 → 审计`
 
@@ -14,7 +14,7 @@ Grad-Ops 是具备动态 Shell 能力、但不授予模型任意主机权限的 
 
 - **LLM 不可信**：模型可动态提出 Shell 命令和脚本，但不能直接执行、授予权限或自行降低风险。
 - **证据约束**：事实性结论必须引用当前任务中真实存在的 evidence ID。
-- **确定性策略**：风险由可执行文件身份、参数语义、目标资源、运行身份和执行环境共同决定；不要求每种运维动作都预先封装成固定工具。
+- **分层安全控制**：Policy 判断操作权限与风险，Approval 处理高风险授权，Linux Runtime 施加最终资源和权限边界；AST 用于辅助分析与审计，不作为唯一安全边界。
 - **副作用唯一入口**：所有写操作经过 Executor、契约校验、资源边界和审批闸门。
 - **独立验证**：执行后重新观测状态，不复用调查阶段的证据来证明执行成功。
 - **Linux-only**：不支持 Windows/macOS，不保留跨平台适配层。
@@ -38,7 +38,7 @@ Grad-Ops 是具备动态 Shell 能力、但不授予模型任意主机权限的 
 
 - Go 后端，REST/JSON API 与持久化 Worker。
 - SQLite，使用显式迁移、事务和任务租约。
-- 动态 Linux Shell 执行层：首期以 Bash + AST 分析为目标，支持受控命令组合；能力策略约束可执行文件、参数语义、资源范围和副作用。
+- 动态 Linux Shell 执行层：以持久 Bash Session 提供通用 Shell 能力；Policy/Approval 控制主机操作权限，受限 Runtime 提供 OS 级隔离、资源预算和进程回收；AST 作为辅助分析手段。
 - OpenAI 兼容 LLM API，并提供 mock 模式用于离线测试。
 - 现有 Vue 3 + Vite + Arco Design 前端沿用，通过 REST API 接入 Go 后端。
 - Ubuntu LTS 作为首期开发和 CI 基线；其他发行版须经工具行为测试后再声明支持。
@@ -46,12 +46,12 @@ Grad-Ops 是具备动态 Shell 能力、但不授予模型任意主机权限的 
 ## 首期明确不做
 
 - 多主机扇出、远程 Agent、Agent 自动升级；
-- 未经 AST 分析、确定性策略授权和隔离执行的 Shell/脚本；任意宿主机提权、任意 sudo 和不受控文件系统/网络访问；
+- 未经 Policy 授权与 Runtime 边界约束的主机操作；任意宿主机提权、任意 sudo 和不受控文件系统/网络访问；
 - Windows/macOS 适配；
 - MCP、Kubernetes、外部工具平台、分布式事务和主控高可用。
 - 向量数据库、Embedding 服务和复杂的长期记忆自动提取。
 
-首期动态 Shell 语法范围、执行器和沙箱边界见 [Tool 层安全与 Adapter 扩展设计](docs/design/tool-layer-and-adapters.md)。
+Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全与 Adapter 扩展设计](docs/design/tool-layer-and-adapters.md)。
 
 ## 实施入口
 
