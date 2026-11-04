@@ -12,7 +12,7 @@ Grad-Ops 面向 Linux 主机运维场景，计划构建一套具备证据追溯�
 
 本项目采用 **Go 作为后端主实现语言，Linux 作为唯一支持平台**。前端沿用现有 Vue 3 技术栈，首期采用 SQLite 保存任务和审计数据，以单机闭环为目标，优先验证系统安全性与可追溯性，暂不实现多主机远程 Agent。
 
-本项目是以文档为规格的 Go Greenfield Implementation：核心规格、架构、安全设计和实施计划是需求与设计事实来源。现存 Python 代码仅为 legacy prototype / historical reference，不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。Go 实现本应按文档定义的目标能力独立设计模块、数据模型、状态机和测试体系。
+本项目是以文档为规格的 Go Greenfield Implementation：核心规格、架构、安全设计和实施计划是需求与设计事实来源。现存 Python 代码仅为 legacy prototype / historical reference，不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。Go 实现应按文档定义的目标能力独立设计模块、数据模型、状态机和测试体系。
 
 ## 二、项目背景与建设必要性
 
