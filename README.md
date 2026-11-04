@@ -1,10 +1,12 @@
 # grad-ops
 
-证据约束型自主运维控制平面 · Go + Linux 重构分支
+证据约束型自主运维控制平面 · Go + Linux
 
-> **当前分支：** `refactor/go-linux-core-single-host`  
+> **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **迁移状态：** 当前提交以架构、规格、威胁模型和实施计划为主；Go 后端尚未完成。现有 `app/` Python 代码是历史参考实现，不代表本分支的最终运行方式。
+> **实现状态：** 当前仓库以需求规格、架构设计、威胁模型和实施计划为基线；Go 后端按计划从零构建。
+
+本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
 Grad-Ops 是具备通用 Shell 能力、但不把主机权限交给模型的 Linux 运维 Agent 与控制平面。Agent 可动态组合 Bash 命令、脚本、管道、重定向和命令替换；Shell 是通用执行接口，不是预定义运维动作菜单。命令经策略授权后进入受限 Linux Runtime 执行：
 
@@ -29,7 +31,7 @@ Grad-Ops 是具备通用 Shell 能力、但不把主机权限交给模型的 Lin
 | [记忆与知识库设计](docs/design/memory-and-knowledge.md) | Task History、Memory、Knowledge 与实时 Evidence 的边界及分阶段实现方案 |
 | [威胁模型](docs/threat-model.md) | 提示注入、Shell 动态执行、越权、审批重放、文件系统竞态等威胁 |
 | [Tool 层与动态 Shell 设计](docs/design/tool-layer-and-adapters.md) | Shell AST、能力策略、动作契约、隔离执行与未来 Adapter 边界 |
-| [Go + Linux 重构计划](docs/plans/2026-10-26-go-linux-refactor.md) | 分阶段实施与每阶段验收标准 |
+| [Go + Linux 实施计划](docs/plans/2026-10-26-go-linux-implementation-plan.md) | 分阶段实施与每阶段验收标准 |
 | [多主机 Go Agent 旧方案](docs/plans/2026-10-26-multi-host-go-agent.md) | 未来扩展参考；首期不实现 |
 | [核心闭环旧实施计划](docs/plans/2026-10-14-grad-ops-core-loop.md) | Python 版本的历史实现参考 |
 | [测试报告](docs/test-report.md) | 旧 Python 版本的历史测试基线，不等同于 Go 版测试结果 |
@@ -55,6 +57,6 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 
 ## 实施入口
 
-从 [Go + Linux 重构计划](docs/plans/2026-10-26-go-linux-refactor.md) 的 Phase 0 开始。不要把 Python 模块逐文件机械翻译成 Go；先冻结状态机、动作契约、错误模型和测试向量，再按 Go 的职责边界实现。
+从 [Go + Linux 实施计划](docs/plans/2026-10-26-go-linux-implementation-plan.md) 的 Phase 0 开始。按规格定义的目标能力从零设计并实现 Go 系统；不要把 Python 模块逐文件翻译成 Go，也不要求兼容或复刻旧 Python 架构。先冻结状态机、动作契约、错误模型和测试向量，再按 Go 的职责边界实现。
 
 在 Go 版代码与测试真正落地前，本 README 不提供 Go 运行命令，也不声称 Go 版已经具备旧 Python 版本的功能或测试覆盖率。

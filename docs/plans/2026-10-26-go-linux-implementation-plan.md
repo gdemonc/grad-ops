@@ -1,6 +1,6 @@
-# Go + Linux 核心重构实施计划
+# Go + Linux 核心实施计划
 
-> 目标：在 `grad-ops` 中建立 Go 版核心控制平面。Linux 是唯一支持平台。旧 Python 版本保留为行为参考，不要求与新实现逐文件对应。
+> 目标：在 `grad-ops` 中建立 Go 核心控制平面。Linux 是唯一支持平台。本项目按文档规格从零实现 Go 版本；旧 Python 代码仅作历史参考，不作为迁移基线、兼容要求或架构模板。
 > 原则：先完成可测试的单机安全闭环，再考虑多主机。不要在第一阶段同时引入远程 Agent。
 
 ## Phase 0：规格冻结
@@ -10,9 +10,9 @@
 - [ ] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell Session、Policy/Approval、Action Contract 与 Linux Runtime 边界。\n- [ ] 评审任务生命周期与故障恢复设计：\`docs/design/task-lifecycle-and-recovery.md\`。\n- [ ] 评审 Tool 层安全与 Adapter 抽象：\`docs/design/tool-layer-and-adapters.md\`。\n- [ ] 评审敏感数据与日志安全要求：\`docs/design/data-security-and-logging.md\`。
 - [ ] 定义规范化 JSON 和 SHA-256 摘要测试向量。
 - [ ] 定义 API request/response DTO 与数据库迁移策略。
-- [ ] 将旧文档中 Windows/PowerShell/跨平台要求标为历史设计或删除。
+- [ ] 清理与首期 Linux-only 目标冲突的 Windows/PowerShell/跨平台要求。
 
-**验收：** 文档不再把 Python 主控或 Windows 适配作为新版本的目标；每个首期需求都有测试验收条件。
+**验收：** 文档明确 Go Greenfield 实现与 Linux-only 边界；Python 不构成功能兼容或架构迁移要求；每个首期需求都有测试验收条件。
 
 ## Phase 1：Go 项目骨架与持久化
 
@@ -78,7 +78,7 @@
 - [ ] Vue 3 前端对接 Go REST API。
 - [ ] Linux systemd unit、专用非 root 账号、配置与数据库权限。
 - [ ] README 更新为 Go/Linux 安装、运行、测试和限制说明。
-- [ ] 测试报告区分 Python 历史基线与 Go 实测结果。
+- [ ] 测试报告只将 Python 测试作为历史背景；Go 测试结果必须来自 Go 实际实现与实测。
 - [ ] 生成测试矩阵、性能测量与安全限制说明。
 
 **验收：** 在干净的 Ubuntu 环境中可按文档完成部署；全套测试结果可复现。
