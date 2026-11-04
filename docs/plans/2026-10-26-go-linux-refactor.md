@@ -7,7 +7,7 @@
 
 - [ ] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
 - [ ] 确定首期 Ubuntu LTS 版本与支持的 Go 版本。
-- [ ] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell AST 契约与隔离执行配置。\n- [ ] 评审任务生命周期与故障恢复设计：\`docs/design/task-lifecycle-and-recovery.md\`。\n- [ ] 评审 Tool 层安全与 Adapter 抽象：\`docs/design/tool-layer-and-adapters.md\`。\n- [ ] 评审敏感数据与日志安全要求：\`docs/design/data-security-and-logging.md\`。
+- [ ] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell Session、Policy/Approval、Action Contract 与 Linux Runtime 边界。\n- [ ] 评审任务生命周期与故障恢复设计：\`docs/design/task-lifecycle-and-recovery.md\`。\n- [ ] 评审 Tool 层安全与 Adapter 抽象：\`docs/design/tool-layer-and-adapters.md\`。\n- [ ] 评审敏感数据与日志安全要求：\`docs/design/data-security-and-logging.md\`。
 - [ ] 定义规范化 JSON 和 SHA-256 摘要测试向量。
 - [ ] 定义 API request/response DTO 与数据库迁移策略。
 - [ ] 将旧文档中 Windows/PowerShell/跨平台要求标为历史设计或删除。
@@ -29,12 +29,14 @@
 
 ## Phase 2：Linux 只读工具与调查
 
-- [ ] 定义 Shell Proposal 与 Action Contract：脚本摘要、AST 摘要、Shell/Parser 版本、工作目录、环境白名单、身份、目标资源、隔离配置和预算。
-- [ ] 引入 Shell AST Parser（建议评估 `mvdan.cc/sh`），实现解析、规范化、节点限制和完整 AST 遍历；评估 Bash 兼容性及版本锁定。
-- [ ] 首期支持普通命令、管道、重定向、`;`、`&&`、`||`、命令替换和多行提案；循环/函数等复杂节点按能力逐步开放，未支持语法节点明确拒绝。
-- [ ] 不为每一种运维动作预先封装业务工具；服务端维护可执行文件身份、参数语义、资源范围和副作用能力约束。
-- [ ] 实现 R0-R4 确定性风险策略，分析管道各阶段、条件分支、重定向目标和副作用组合。
-- [ ] 实现 Linux Bash Adapter 与专用非 root 执行账号；优先使用 systemd transient unit/cgroup 施加资源限制，评估 Landlock、Bubblewrap、AppArmor/seccomp 等增强项，不把首期做成重型容器平台。
+- [ ] 实现通用持久 Bash Session：固定 Bash、会话生命周期、工作目录、受控环境、超时、输出截断和调用预算。
+- [ ] 实现 Policy/Approval：按主体身份、目标资源、副作用、风险和部署策略判定授权；不穷举预定义业务命令。
+- [ ] 可选引入 Shell AST Parser（建议评估 `mvdan.cc/sh`）作为辅助分析器，用于结构展示、风险提示和审计；不得把 AST 解析/白名单作为唯一安全边界。
+- [ ] 实现 Action Contract，绑定原始脚本摘要、目标资源、主体/运行身份、Shell/Runtime 版本、隔离配置和预算；AST 摘要仅作为辅助审计字段。
+- [ ] 实现 Linux Runtime：专用非 root 身份、systemd transient unit/scope 或等效 cgroup、CPU/内存/PID/时间/输出限制、进程组回收。
+- [ ] 调查和操作分离：调查阶段开放必要只读视图；写文件、服务管理、包管理和权限变更进入 Host Operation 授权流程。
+- [ ] 高权限操作经独立、窄接口、可审计的 privileged broker/helper；不把 Agent 加入 sudo 组，不向 Bash Session 暴露任意 sudo。
+- [ ] 评估文件系统与网络隔离的首期可行配置；Landlock、Bubblewrap、AppArmor/seccomp 按需增强，不要求首期全部引入。
 - [ ] 测试超时、输出上限、环境清理、CPU/内存/PID/文件大小预算、进程组终止和调用轮次。
 - [ ] 实现统一 Command/Tool Adapter 接口；不实现 MCP Client。
 - [ ] OpenAI 兼容 LLM client，支持 mock provider。
@@ -42,7 +44,7 @@
 - [ ] Grounding 只接受真实 evidence ID。
 - [ ] 对提示注入、未知工具、畸形 JSON 和预算耗尽编写对抗测试。
 
-**验收：** Agent 能组合管道、重定向和条件连接完成常见只读排查；完整 AST 可审查，R0 调查不能触发写操作，脚本在非 root 受限环境中执行。
+**验收：** Agent 能通过通用 Bash Session 完成常见只读排查；Policy 能约束主体、目标资源和副作用；Runtime 的非 root、资源与进程边界有集成测试；AST 不被当作唯一安全保证。
 
 ## Phase 3：策略、契约与审批
 
@@ -50,7 +52,7 @@
 - [ ] 动作契约规范化、摘要计算和执行前比对。
 - [ ] 审批凭证只存 hash，设置短时效并绑定具体契约。
 - [ ] 原子消费凭证，测试重复提交和并发双消费。
-- [ ] 未知工具、未知参数、策略缺失、越界资源均 fail-closed。
+- [ ] 未知主体、未授权资源、策略缺失、越界操作和授权状态不确定均 fail-closed。
 - [ ] R3 受限身份与 R4 禁止动作策略测试。
 - [ ] 确保 policy 包不依赖 LLM 包。
 
@@ -60,7 +62,7 @@
 
 - [ ] 实现唯一副作用执行入口。
 - [ ] Linux 文件操作加入 symlink、TOCTOU 和路径边界防护。
-- [ ] 首期仅启用经过评审的受控副作用场景（例如日志备份与轮转）；所有 Shell 副作用须经过 AST 资源分析、契约、策略、必要审批和隔离执行，不开放任意提权。
+- [ ] 首期仅启用经过评审的受控副作用场景（例如日志备份与轮转）；所有 Shell 副作用须经过 Policy、契约、必要审批和 Runtime 边界控制，不开放任意提权。
 - [ ] 执行结果和实际参数摘要写入 execution record。
 - [ ] 验证阶段使用新的只读观测，禁止复用调查证据。
 - [ ] 显式定义每种副作用的恢复动作和恢复后验证。
