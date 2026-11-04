@@ -57,6 +57,6 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 
 ## 实施入口
 
-从 [Go + Linux 实施计划](docs/plans/2026-10-26-go-linux-refactor.md) 的 Phase 0 开始。按规格定义的目标能力从零设计并实现 Go 系统；不要把 Python 模块逐文件翻译成 Go，也不要求兼容或复刻旧 Python 架构。先冻结状态机、动作契约、错误模型和测试向量，再按 Go 的职责边界实现。
+从 [Go + Linux 实施计划](docs/plans/2026-10-26-go-linux-implementation-plan.md) 的 Phase 0 开始。按规格定义的目标能力从零设计并实现 Go 系统；不要把 Python 模块逐文件翻译成 Go，也不要求兼容或复刻旧 Python 架构。先冻结状态机、动作契约、错误模型和测试向量，再按 Go 的职责边界实现。
 
 在 Go 版代码与测试真正落地前，本 README 不提供 Go 运行命令，也不声称 Go 版已经具备旧 Python 版本的功能或测试覆盖率。
