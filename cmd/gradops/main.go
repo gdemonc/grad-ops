@@ -21,6 +21,7 @@ import (
 	"github.com/gdemonc/grad-ops/internal/config"
 	"github.com/gdemonc/grad-ops/internal/store"
 	"github.com/gdemonc/grad-ops/internal/task"
+	"github.com/gdemonc/grad-ops/internal/worker"
 )
 
 // version is set at build time with
@@ -59,6 +60,26 @@ func run() error {
 
 	if err := db.Migrate(ctx); err != nil {
 		return err
+	}
+
+	// Recover leases left behind by a previous process before serving traffic.
+	// An expired lease means a worker died; it does not mean the work finished.
+	// Read-only jobs return to the queue, anything else is abandoned as unknown
+	// instead of being replayed on a guess.
+	workerID := fmt.Sprintf("%s-%d", hostname(), os.Getpid())
+	wk, err := worker.New(db, worker.DefaultConfig(workerID), logger)
+	if err != nil {
+		return err
+	}
+	recovered, err := wk.Recover(ctx)
+	if err != nil {
+		return fmt.Errorf("recover expired job leases: %w", err)
+	}
+	if recovered.Requeued > 0 || recovered.Abandoned > 0 {
+		logger.Warn("recovered expired job leases",
+			"requeued", recovered.Requeued,
+			"abandoned", recovered.Abandoned,
+		)
 	}
 
 	tasks := task.NewService(db)
@@ -107,4 +128,14 @@ func run() error {
 
 	logger.Info("gradops stopped")
 	return nil
+}
+
+// hostname identifies this process in lease records. It falls back to a fixed
+// name so a missing hostname never blocks startup.
+func hostname() string {
+	name, err := os.Hostname()
+	if err != nil || name == "" {
+		return "gradops"
+	}
+	return name
 }

@@ -27,9 +27,6 @@ const (
 	// defaultLimit and maxLimit bound list responses.
 	defaultLimit = 50
 	maxLimit     = 200
-
-	jobKindInvestigate = "investigate"
-	jobStatusPending   = "PENDING"
 )
 
 // Service reads and writes tasks.
@@ -98,7 +95,8 @@ VALUES (?, ?, ?, ?, ?)`,
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO task_jobs (task_id, kind, status, available_at, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)`,
-			id, jobKindInvestigate, jobStatusPending, created, created, created); err != nil {
+			id, string(domain.JobKindInvestigate), string(domain.JobStatusPending),
+			created, created, created); err != nil {
 			return fmt.Errorf("enqueue investigation job: %w", err)
 		}
 
