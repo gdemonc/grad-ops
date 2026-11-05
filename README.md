@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** 当前仓库以需求规格、架构设计、威胁模型和实施计划为基线；Go 后端按计划从零构建。
+> **实现状态：** Phase 1（Go 项目骨架与持久化）进行中：配置、HTTP API、SQLite 迁移、任务状态机、审计哈希链与任务持久化已落地；Worker、Shell 执行、策略、审批与执行链尚未实现。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -59,4 +59,46 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 
 从 [Go + Linux 实施计划](docs/plans/2026-10-26-go-linux-implementation-plan.md) 的 Phase 0 开始。按规格定义的目标能力从零设计并实现 Go 系统；不要把 Python 模块逐文件翻译成 Go，也不要求兼容或复刻旧 Python 架构。先冻结状态机、动作契约、错误模型和测试向量，再按 Go 的职责边界实现。
 
-在 Go 版代码与测试真正落地前，本 README 不提供 Go 运行命令，也不声称 Go 版已经具备旧 Python 版本的功能或测试覆盖率。
+## 当前实现状态
+
+首期按 [Go + Linux 实施计划](docs/plans/2026-10-26-go-linux-implementation-plan.md) 分阶段落地。当前分支 `feat/phase1-go-skeleton` 只完成 Phase 1 的一部分：
+
+| 能力 | 状态 |
+| --- | --- |
+| 配置校验、JSON 日志、优雅关闭、健康检查 | 已实现 |
+| SQLite 版本化迁移与 8 张基础表 | 已实现 |
+| 任务状态机（单一迁移入口） | 已实现 |
+| 追加式审计哈希链与链校验 | 已实现 |
+| 任务创建、查询与时间线 API | 已实现 |
+| Worker 认领、租约与崩溃恢复 | 未实现 |
+| 通用 Bash Session、Policy、审批、执行、验证与恢复 | 未实现 |
+
+未实现的阶段不会假装可用：API 目前没有任何执行入口，任务停留在 `QUEUED`。
+
+## 本地运行与测试
+
+```bash
+go build -o bin/gradops ./cmd/gradops
+GRADOPS_ADDR=127.0.0.1:8080 GRADOPS_DB_PATH=./data/gradops.db ./bin/gradops
+go test ./...
+```
+
+环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `GRADOPS_ADDR` | `127.0.0.1:8080` | 监听地址，必须为 `host:port` |
+| `GRADOPS_DB_PATH` | `./data/gradops.db` | SQLite 文件路径 |
+| `GRADOPS_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `GRADOPS_MAX_REQUEST_BYTES` | `1048576` | 请求体上限，最大 8 MiB |
+
+接口：
+
+- `GET /healthz`、`GET /api/health`
+- `POST /api/tasks`，请求体 `{"request_text": "..."}`
+- `GET /api/tasks?status=&limit=`
+- `GET /api/tasks/{id}`
+- `GET /api/tasks/{id}/timeline`
+- `GET /api/audit/verify`
+
+已实现的 Go 测试在 Linux CI 通过之前，不应被当作 Linux 环境下的验证结果。
