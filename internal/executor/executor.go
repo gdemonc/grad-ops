@@ -206,18 +206,18 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 	// so the operator can retry with the right token. Nothing has run yet.
 	if evaluation.RequiresApproval {
 		if strings.TrimSpace(req.ApprovalToken) == "" {
-			s.release(ctx, proposal.ID, previous)
+			s.release(ctx, proposal.ID, proposal.TaskID, previous)
 			return Outcome{}, ErrApprovalRequired
 		}
 		if _, err := s.approvals.Consume(ctx, req.ApprovalToken, proposal.Digest); err != nil {
-			s.release(ctx, proposal.ID, previous)
+			s.release(ctx, proposal.ID, proposal.TaskID, previous)
 			return Outcome{}, err
 		}
 	}
 
 	session, err := s.session(proposal.Contract)
 	if err != nil {
-		s.release(ctx, proposal.ID, previous)
+		s.release(ctx, proposal.ID, proposal.TaskID, previous)
 		return Outcome{}, fmt.Errorf("prepare shell: %w", err)
 	}
 
@@ -353,11 +353,19 @@ func (s *Service) claim(ctx context.Context, proposal storedProposal, actor stri
 }
 
 // release undoes a claim on a proposal that never ran.
-func (s *Service) release(ctx context.Context, proposalID int64, previous string) {
+//
+// Both rows are restored: leaving the task in EXECUTING after a claim that was
+// abandoned would make every later attempt fail on a state nothing is in.
+func (s *Service) release(ctx context.Context, proposalID, taskID int64, previous string) {
 	_ = s.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`UPDATE proposals SET status = ? WHERE id = ? AND status = 'EXECUTING'`,
-			previous, proposalID)
+			previous, proposalID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`UPDATE tasks SET status = ? WHERE id = ? AND status = 'EXECUTING'`,
+			string(domain.StatusAwaitingApproval), taskID)
 		return err
 	})
 }

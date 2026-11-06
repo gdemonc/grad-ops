@@ -1,9 +1,8 @@
 // Command gradops runs the Grad-Ops control plane.
 //
-// Grad-Ops targets Linux only. This binary serves the REST API and owns the
-// database; the durable worker and the execution path are added in later
-// phases, and until then the service can create, read and audit tasks but it
-// cannot perform host operations.
+// Grad-Ops targets Linux only. This binary serves the REST API, owns the
+// database, runs the durable worker and is the only process that can execute an
+// approved action.
 package main
 
 import (
@@ -18,15 +17,29 @@ import (
 	"time"
 
 	"github.com/gdemonc/grad-ops/internal/api"
+	"github.com/gdemonc/grad-ops/internal/approval"
 	"github.com/gdemonc/grad-ops/internal/config"
+	"github.com/gdemonc/grad-ops/internal/evidence"
+	"github.com/gdemonc/grad-ops/internal/executor"
+	"github.com/gdemonc/grad-ops/internal/investigation"
+	"github.com/gdemonc/grad-ops/internal/policy"
 	"github.com/gdemonc/grad-ops/internal/store"
 	"github.com/gdemonc/grad-ops/internal/task"
+	"github.com/gdemonc/grad-ops/internal/verify"
 	"github.com/gdemonc/grad-ops/internal/worker"
 )
 
 // version is set at build time with
 // -ldflags "-X main.version=<version>".
 var version = "dev"
+
+// defaultProbes are the read-only commands the stub planner runs. They answer
+// "is this host healthy" without touching anything.
+var defaultProbes = []string{
+	"uname -a",
+	"uptime",
+	"df -h",
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -82,11 +95,84 @@ func run() error {
 		)
 	}
 
+	engine, err := policy.New(policy.Config{
+		Version:      cfg.PolicyVersion,
+		AllowedRoots: cfg.AllowedRoots,
+	})
+	if err != nil {
+		return fmt.Errorf("build policy: %w", err)
+	}
+
+	baseEnv := map[string]string{
+		"PATH": os.Getenv("PATH"),
+		"HOME": cfg.WorkDir,
+	}
+	mapWorkDir := func(string) string { return cfg.WorkDir }
+
+	evidenceStore := evidence.New()
+
+	approvals, err := approval.New(db, cfg.ApprovalTTL)
+	if err != nil {
+		return fmt.Errorf("build approvals: %w", err)
+	}
+
+	exec, err := executor.New(db, engine, approvals, evidenceStore, executor.Config{
+		Bash:    cfg.Bash,
+		BaseEnv: baseEnv,
+	}, executor.WithWorkDirMapper(mapWorkDir))
+	if err != nil {
+		return fmt.Errorf("build executor: %w", err)
+	}
+
+	verifier, err := verify.New(db, evidenceStore, verify.Config{
+		Bash:    cfg.Bash,
+		BaseEnv: baseEnv,
+		Timeout: cfg.ProbeTimeout,
+	}, verify.WithWorkDirMapper(mapWorkDir))
+	if err != nil {
+		return fmt.Errorf("build verifier: %w", err)
+	}
+
+	investigator, err := investigation.New(db, engine,
+		investigation.StubPlanner{Probes: defaultProbes},
+		investigation.Config{
+			Bash:            cfg.Bash,
+			BaseEnv:         baseEnv,
+			WorkDir:         cfg.WorkDir,
+			ContractWorkDir: cfg.ContractWorkDir,
+			Timeout:         cfg.ProbeTimeout,
+			MaxOutputBytes:  cfg.MaxOutputBytes,
+			MaxCalls:        len(defaultProbes),
+		})
+	if err != nil {
+		return fmt.Errorf("build investigation: %w", err)
+	}
+
+	// The worker loop is cancelled by the same context as the HTTP server, so a
+	// shutdown stops claiming new jobs and lets an in-flight one finish.
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	defer stopWorker()
+
+	if cfg.EnableWorker {
+		go func() {
+			if err := wk.Run(workerCtx, investigator); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("worker stopped", "err", err)
+			}
+		}()
+		logger.Info("worker loop started", "owner", workerID)
+	} else {
+		logger.Warn("worker loop disabled; tasks will queue without being investigated")
+	}
+
 	tasks := task.NewService(db)
 	handler := api.New(api.Deps{
 		Logger:          logger,
 		Tasks:           tasks,
 		DB:              db,
+		Evidence:        evidenceStore,
+		Approvals:       approvals,
+		Executor:        exec,
+		Verifier:        verifier,
 		Version:         version,
 		MaxRequestBytes: cfg.MaxRequestBytes,
 	})
@@ -109,6 +195,8 @@ func run() error {
 		"addr", cfg.Addr,
 		"database", cfg.DBPath,
 		"version", version,
+		"policy", cfg.PolicyVersion,
+		"roots", cfg.AllowedRoots,
 	)
 
 	select {
@@ -119,6 +207,8 @@ func run() error {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
 	}
+
+	stopWorker()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

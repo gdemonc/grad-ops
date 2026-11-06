@@ -15,9 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gdemonc/grad-ops/internal/approval"
 	"github.com/gdemonc/grad-ops/internal/domain"
+	"github.com/gdemonc/grad-ops/internal/evidence"
+	"github.com/gdemonc/grad-ops/internal/executor"
 	"github.com/gdemonc/grad-ops/internal/store"
 	"github.com/gdemonc/grad-ops/internal/task"
+	"github.com/gdemonc/grad-ops/internal/verify"
 )
 
 // Deps are the collaborators a router needs.
@@ -25,6 +29,10 @@ type Deps struct {
 	Logger          *slog.Logger
 	Tasks           *task.Service
 	DB              *store.DB
+	Evidence        *evidence.Store
+	Approvals       *approval.Service
+	Executor        *executor.Service
+	Verifier        *verify.Service
 	Version         string
 	MaxRequestBytes int64
 }
@@ -46,6 +54,11 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/tasks", h.listTasks)
 	mux.HandleFunc("GET /api/tasks/{id}", h.getTask)
 	mux.HandleFunc("GET /api/tasks/{id}/timeline", h.timeline)
+	mux.HandleFunc("GET /api/tasks/{id}/evidence", h.listEvidence)
+	mux.HandleFunc("POST /api/tasks/{id}/verify", h.verifyTask)
+	mux.HandleFunc("GET /api/proposals/{id}", h.getProposal)
+	mux.HandleFunc("POST /api/proposals/{id}/approvals", h.approveProposal)
+	mux.HandleFunc("POST /api/proposals/{id}/execute", h.executeProposal)
 	mux.HandleFunc("GET /api/audit/verify", h.verifyAudit)
 
 	return recoveryMiddleware(d.Logger, loggingMiddleware(d.Logger, mux))
@@ -292,10 +305,15 @@ func (h *handlers) writeServiceError(w http.ResponseWriter, err error) {
 }
 
 func parseID(r *http.Request) (int64, error) {
+	return parsePathID(r, "task id")
+}
+
+// parsePathID reads a positive integer path parameter.
+func parsePathID(r *http.Request, name string) (int64, error) {
 	raw := r.PathValue("id")
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("%w: task id must be a positive integer", domain.ErrInvalidRequest)
+		return 0, fmt.Errorf("%w: %s must be a positive integer", domain.ErrInvalidRequest, name)
 	}
 	return id, nil
 }
