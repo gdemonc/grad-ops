@@ -8,7 +8,7 @@ import {
 import { onMounted } from 'vue'
 import { useTasksStore } from '../stores/tasks'
 import { guardStatusMeta } from '../types'
-import type { SafetyReport, SafetyGuard } from '../types'
+import type { SafetyGuard, SafetyReport } from '../types'
 
 const store = useTasksStore()
 
@@ -20,7 +20,7 @@ function bannerType(status: SafetyReport['overall_status']): 'success' | 'warnin
 
 function bannerTitle(status: SafetyReport['overall_status']): string {
   if (status === 'ok') return '安全状态正常'
-  if (status === 'warn') return '安全状态告警'
+  if (status === 'warn') return '部分边界尚未实现'
   return '副作用执行已被阻断'
 }
 
@@ -30,8 +30,9 @@ function guardIcon(status: SafetyGuard['status']) {
   return IconCloseCircleFill
 }
 
-function boolText(value: boolean): string {
-  return value ? '是' : '否'
+function ttlText(ms: number): string {
+  if (ms % 60000 === 0) return `${ms / 60000} 分钟`
+  return `${Math.round(ms / 1000)} 秒`
 }
 
 onMounted(() => {
@@ -44,7 +45,7 @@ onMounted(() => {
     <div class="page-head">
       <div>
         <h2>安全报告</h2>
-        <div class="page-sub">运行身份、工具白名单、路径边界与审批闸门的实时状态</div>
+        <div class="page-sub">策略、契约、审批与运行边界的真实状态，未实现的能力会直接标注</div>
       </div>
       <a-button :loading="store.safetyLoading" @click="store.fetchSafetyReport()">
         <template #icon><icon-refresh /></template>
@@ -65,101 +66,64 @@ onMounted(() => {
 
         <div class="grid-2">
           <a-card class="panel">
-            <template #title><div class="panel-title">执行身份</div></template>
+            <template #title><div class="panel-title">运行时配置</div></template>
             <div class="kv">
-              <span class="k">运行用户</span>
-              <span class="v mono">{{ store.safetyReport.executor.runtime_user }}</span>
+              <span class="k">Shell</span>
+              <span class="v mono">{{ store.safetyReport.runtime.bash }}</span>
             </div>
             <div class="kv">
-              <span class="k">运行 uid</span>
-              <span class="v mono">{{ store.safetyReport.executor.runtime_uid }}</span>
+              <span class="k">工作目录</span>
+              <span class="v mono">{{ store.safetyReport.runtime.work_dir }}</span>
             </div>
             <div class="kv">
-              <span class="k">目标用户</span>
-              <span class="v mono">{{ store.safetyReport.executor.target_user }}</span>
+              <span class="k">契约工作目录</span>
+              <span class="v mono">{{ store.safetyReport.runtime.contract_work_dir }}</span>
             </div>
             <div class="kv">
-              <span class="k">允许 root 执行</span>
+              <span class="k">策略版本</span>
+              <span class="v mono">{{ store.safetyReport.runtime.policy_version }}</span>
+            </div>
+            <div class="kv">
+              <span class="k">审批有效期</span>
+              <span class="v mono">{{ ttlText(store.safetyReport.runtime.approval_ttl_ms) }}</span>
+            </div>
+            <div class="kv">
+              <span class="k">后台 Worker</span>
               <span class="v">
-                <a-tag
-                  :color="store.safetyReport.executor.allow_root_executor ? 'orange' : 'green'"
-                  size="small"
-                >
-                  {{ boolText(store.safetyReport.executor.allow_root_executor) }}
-                </a-tag>
-              </span>
-            </div>
-            <div class="kv">
-              <span class="k">副作用执行</span>
-              <span class="v">
-                <a-tag
-                  :color="store.safetyReport.executor.action_execution_enabled ? 'green' : 'red'"
-                  size="small"
-                >
-                  {{ store.safetyReport.executor.action_execution_enabled ? '已开放' : '已锁定' }}
+                <a-tag :color="store.safetyReport.runtime.worker_enabled ? 'green' : 'orange'" size="small">
+                  {{ store.safetyReport.runtime.worker_enabled ? '已启用' : '已停用' }}
                 </a-tag>
               </span>
             </div>
           </a-card>
 
           <a-card class="panel">
-            <template #title><div class="panel-title">路径与工具边界</div></template>
-            <div class="kv">
-              <span class="k">副作用工具</span>
-            </div>
+            <template #title><div class="panel-title">允许的路径根</div></template>
             <div class="tag-row">
               <a-tag
-                v-for="tool in store.safetyReport.boundary.allowed_tools"
-                :key="tool"
-                color="cyan"
-                class="mono"
-                size="small"
-              >
-                {{ tool }}
-              </a-tag>
-            </div>
-            <div class="kv" style="margin-top: 10px">
-              <span class="k">允许路径前缀</span>
-            </div>
-            <div class="tag-row">
-              <a-tag
-                v-for="prefix in store.safetyReport.boundary.allowed_path_prefixes"
-                :key="prefix"
+                v-for="root in store.safetyReport.runtime.allowed_roots"
+                :key="root"
                 color="green"
                 class="mono"
                 size="small"
               >
-                {{ prefix }}
+                {{ root }}
               </a-tag>
             </div>
-            <div class="kv" style="margin-top: 10px">
-              <span class="k">受保护路径</span>
+            <div class="kv" style="margin-top: 12px">
+              <span class="k">说明</span>
             </div>
-            <div class="tag-row">
-              <a-tag
-                v-for="prefix in store.safetyReport.boundary.protected_path_prefixes"
-                :key="prefix"
-                color="red"
-                class="mono"
-                size="small"
-              >
-                {{ prefix }}
-              </a-tag>
-            </div>
+            <p class="dim">
+              动作声明的每个路径都必须落在这些根之内；契约里的运行身份必须是显式声明的非 root
+              身份。策略层目前是确定性的模式匹配，不是 AST 分析。
+            </p>
           </a-card>
         </div>
 
         <a-card class="panel" style="margin-top: 16px">
           <template #title><div class="panel-title">防护闸门</div></template>
-          <div
-            v-for="guard in store.safetyReport.guards"
-            :key="guard.key"
-            class="guard-item"
-          >
-            <component
-              :is="guardIcon(guard.status)"
-              :class="['guard-icon', guard.status]"
-            />
+          <div v-for="guard in store.safetyReport.guards" :key="guard.key" class="guard-item">
+            <component :is="guardIcon(guard.status)" :class="['guard-icon', guard.status]" />
             <div>
               <div class="guard-name">
                 {{ guard.name }}

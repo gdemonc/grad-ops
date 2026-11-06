@@ -1,24 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { formatTime, prettyJson, stageColor } from '../types'
+import { eventTypeColor, formatTime, prettyJson } from '../types'
 import type { TimelineEvent } from '../types'
 
 const props = defineProps<{
   event: TimelineEvent
 }>()
 
-const payloadText = computed(() => prettyJson(props.event.payload_json))
+const payloadText = computed(() => prettyJson(props.event.payload))
 const hasPayload = computed(
-  () => payloadText.value.length > 0 && payloadText.value !== '{}',
+  () => payloadText.value.length > 0 && payloadText.value !== '{}' && payloadText.value !== 'null',
 )
 </script>
 
 <template>
-  <a-timeline-item :dot-color="stageColor(event.stage)">
+  <a-timeline-item :dot-color="eventTypeColor(event.type)">
     <div class="tl-head">
       <span class="mono dim">#{{ event.seq }}</span>
-      <a-tag :color="stageColor(event.stage)" size="small">{{ event.stage }}</a-tag>
-      <span class="mono tl-time">{{ event.event_type }}</span>
+      <a-tag :color="eventTypeColor(event.type)" size="small">{{ event.type }}</a-tag>
+      <span class="mono tl-time">{{ event.actor }}</span>
       <span class="tl-time">{{ formatTime(event.created_at) }}</span>
     </div>
     <div class="tl-msg">{{ event.message }}</div>

@@ -4,168 +4,161 @@ export type TaskStatus =
   | 'AWAITING_APPROVAL'
   | 'EXECUTING'
   | 'VERIFYING'
+  | 'ROLLING_BACK'
   | 'SEALED'
-  | 'REJECTED'
-  | 'BLOCKED'
   | 'ROLLED_BACK'
+  | 'RECOVERY_FAILED'
+  | 'REJECTED'
   | 'FAILED'
 
-export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CONSUMED'
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CONSUMED' | 'EXPIRED'
 
 export type ProposalStatus =
-  | 'DRAFT'
   | 'PENDING_APPROVAL'
   | 'APPROVED'
   | 'REJECTED'
-  | 'DENIED_BY_POLICY'
+  | 'EXECUTING'
   | 'EXECUTED'
+  | 'ROLLING_BACK'
   | 'FAILED'
 
 export type TaskSummary = {
   id: number
-  trace_id: string
   request_text: string
+  source: string
   status: TaskStatus
   summary: string | null
+  failure_stage: string | null
   created_at: string
+  updated_at: string
 }
 
 export type EvidenceItem = {
-  id: number
-  kind: string
-  summary: string
+  id: string
+  tool: string
+  command: string
+  observed_at: string
+  content: string
   content_hash: string
+  truncated: boolean
+}
+
+export type Postcondition = {
+  command: string
+  expect_exit_code: number
+  stdout_contains: string
+}
+
+export type ActionContract = {
+  task_id: number
+  tool: string
+  kind: string
+  script: string
+  script_digest: string
+  work_dir: string
+  env: Record<string, string>
+  paths: string[] | null
+  run_as: string
+  reversible: boolean
+  policy_ref: string
+  runtime: { timeout_ms: number; max_output_bytes: number; max_calls: number }
+  postcondition: Postcondition
+  compensation?: Postcondition | null
+  risk: string
+  policy_version: string
+  approval_level: string
+  nonce: string
   created_at: string
+  expires_at: string
 }
 
 export type ProposalItem = {
   id: number
-  tool_name: string
+  task_id: number
+  tool: string
   risk_level: string
-  rationale: string
+  policy_version: string
+  contract: ActionContract
+  contract_digest: string
   status: ProposalStatus
-  contract_digest: string | null
-  preconditions_json: unknown
-  postconditions_json: unknown
+  rationale: string
+  created_at: string
 }
 
 export type ApprovalItem = {
   id: number
   proposal_id: number
+  task_id: number
+  approver: string
+  comment: string
+  decision: string
   status: ApprovalStatus
-  decided_by: string | null
-  comment: string | null
+  expires_at: string
+  consumed_at: string
+  created_at: string
+  tool: string
+  risk_level: string
+  proposal_status: string
+  request_text: string
 }
 
 export type ExecutionItem = {
   id: number
   proposal_id: number
-  ok: boolean
-  exit_code: number | null
-  stdout: string | null
-  stderr: string | null
-  duration_ms: number | null
-  executed_at: string | null
-}
-
-export type VerificationCheck = {
-  name: string
-  ok: boolean
-  detail: string
-  tool_call_names: string[]
+  outcome: string
+  exit_code: number
+  output_truncated: boolean
+  run_as: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
 }
 
 export type VerificationItem = {
   id: number
+  task_id: number
   proposal_id: number
-  checks_json: VerificationCheck[]
+  postcondition: string
   passed: boolean
-  note: string | null
-  verified_at: string | null
+  evidence_id: string
+  checked_at: string
+}
+
+export type TimelineEvent = {
+  seq: number
+  task_id: number | null
+  type: string
+  actor: string
+  message: string
+  payload: unknown
+  created_at: string
 }
 
 export type TaskDetail = {
-  id: number
-  trace_id: string
-  request_text: string
-  source: string
-  status: TaskStatus
-  summary: string | null
-  created_at: string
-  updated_at: string
+  task: TaskSummary
+  timeline: TimelineEvent[]
   evidence: EvidenceItem[]
   proposals: ProposalItem[]
   approvals: ApprovalItem[]
   executions: ExecutionItem[]
   verifications: VerificationItem[]
-  grounding_summary: GroundingSummary | null
-}
-
-export type GroundingSummary = {
-  supported?: GroundingClaim[]
-  unsupported?: GroundingClaim[]
-  [key: string]: unknown
-}
-
-export type GroundingClaim = {
-  text?: string
-  evidence_ids?: string[]
-  [key: string]: unknown
-}
-
-export type TimelineEvent = {
-  seq: number
-  stage: string
-  event_type: string
-  message: string
-  payload_json: Record<string, unknown> | null
-  created_at: string
-}
-
-export type ApprovalQueueItem = {
-  id: number
-  proposal_id: number
-  status: ApprovalStatus
-  decided_by: string | null
-  decided_at: string | null
-  comment: string | null
-  tool_name: string
-  risk_level: string
-  task_id: number
-  request_text: string
-}
-
-export type AuditVerifyEntry = {
-  chain_id: number
-  seq: number
-  prev_ok: boolean
-  payload_ok: boolean
-  event_ok: boolean
-  valid: boolean
-  stored_event_hash: string
-  expected_event_hash: string
 }
 
 export type AuditVerifyResult = {
-  trace_id: string
-  valid: boolean
-  entry_count: number
-  head_hash: string
-  entries?: AuditVerifyEntry[]
+  ok: boolean
+  events: number
+  broken_seq?: number
+  reason?: string
 }
 
-export type SafetyExecutor = {
-  runtime_user: string
-  runtime_uid: number
-  target_user: string
-  allow_root_executor: boolean
-  action_execution_enabled: boolean
-}
-
-export type SafetyBoundary = {
-  allowed_tools: string[]
-  allowed_path_prefixes: string[]
-  protected_path_prefixes: string[]
+export type SafetyRuntime = {
+  bash: string
+  work_dir: string
+  contract_work_dir: string
+  allowed_roots: string[]
+  policy_version: string
+  approval_ttl_ms: number
+  worker_enabled: boolean
 }
 
 export type SafetyGuard = {
@@ -178,25 +171,39 @@ export type SafetyGuard = {
 export type SafetyReport = {
   overall_status: 'ok' | 'warn' | 'blocked'
   summary: string
-  executor: SafetyExecutor
-  boundary: SafetyBoundary
+  runtime: SafetyRuntime
   guards: SafetyGuard[]
-}
-
-export type CreateTaskResult = {
-  id: number
-  trace_id: string
-  status: TaskStatus
-}
-
-export type RunQueueResult = {
-  worked: boolean
 }
 
 export type ApprovalDecisionResult = {
   approval_id: number
-  status: ApprovalStatus
-  resumed: boolean
+  decision: string
+  expires_at: string
+  token?: string
+}
+
+export type ExecutionResult = {
+  execution_id: number
+  proposal_id: number
+  task_id: number
+  status: string
+  exit_code: number
+  stdout: string
+  stderr: string
+  timed_out: boolean
+  truncated: boolean
+  duration_ms: number
+}
+
+export type VerificationResult = {
+  task_id: number
+  proposal_id: number
+  passed: boolean
+  evidence_id: string
+  exit_code: number
+  stdout: string
+  failures: string[]
+  checked_at: string
 }
 
 export type StatusMeta = {
@@ -210,10 +217,11 @@ export const TASK_STATUS_META: Record<string, StatusMeta> = {
   AWAITING_APPROVAL: { label: '待审批', color: 'orange' },
   EXECUTING: { label: '执行中', color: 'blue' },
   VERIFYING: { label: '验证中', color: 'blue' },
+  ROLLING_BACK: { label: '回滚中', color: 'orangered' },
   SEALED: { label: '已封存', color: 'green' },
+  ROLLED_BACK: { label: '已回滚', color: 'purple' },
+  RECOVERY_FAILED: { label: '恢复失败', color: 'red' },
   REJECTED: { label: '已拒绝', color: 'red' },
-  BLOCKED: { label: '已阻断', color: 'red' },
-  ROLLED_BACK: { label: '已回滚', color: 'red' },
   FAILED: { label: '失败', color: 'red' },
 }
 
@@ -226,44 +234,47 @@ export const RISK_META: Record<string, StatusMeta> = {
 }
 
 export const APPROVAL_STATUS_META: Record<string, StatusMeta> = {
-  PENDING: { label: '待审批', color: 'orange' },
+  PENDING: { label: '待执行', color: 'orange' },
   APPROVED: { label: '已批准', color: 'green' },
   REJECTED: { label: '已拒绝', color: 'red' },
   CONSUMED: { label: '令牌已消费', color: 'gray' },
+  EXPIRED: { label: '令牌已过期', color: 'gray' },
 }
 
 export const PROPOSAL_STATUS_META: Record<string, StatusMeta> = {
-  DRAFT: { label: '草稿', color: 'gray' },
   PENDING_APPROVAL: { label: '待审批', color: 'orange' },
   APPROVED: { label: '已批准', color: 'green' },
   REJECTED: { label: '已拒绝', color: 'red' },
-  DENIED_BY_POLICY: { label: '策略拒绝', color: 'red' },
-  EXECUTED: { label: '已执行', color: 'blue' },
+  EXECUTING: { label: '执行中', color: 'blue' },
+  EXECUTED: { label: '已执行', color: 'cyan' },
+  ROLLING_BACK: { label: '回滚中', color: 'orangered' },
   FAILED: { label: '执行失败', color: 'red' },
 }
 
 export const GUARD_STATUS_META: Record<string, StatusMeta> = {
   ok: { label: '正常', color: 'green' },
-  warn: { label: '告警', color: 'orange' },
+  warn: { label: '未实现 / 降级', color: 'orange' },
   blocked: { label: '已阻断', color: 'red' },
 }
 
-const STAGE_COLORS: Record<string, string> = {
-  queue: '#86909c',
-  worker: '#86909c',
+const EVENT_COLORS: Record<string, string> = {
+  task: '#86909c',
+  job: '#86909c',
   investigation: '#3491db',
-  grounding: '#722ed1',
+  evidence: '#3491db',
   policy: '#0fc6c2',
   approval: '#ff7d00',
+  execution: '#f53f3f',
   executor: '#f53f3f',
   verification: '#00b42a',
+  recovery: '#722ed1',
 }
 
 const TERMINAL_STATUSES: readonly string[] = [
   'SEALED',
-  'REJECTED',
-  'BLOCKED',
   'ROLLED_BACK',
+  'RECOVERY_FAILED',
+  'REJECTED',
   'FAILED',
 ]
 
@@ -287,8 +298,9 @@ export function guardStatusMeta(status: string): StatusMeta {
   return GUARD_STATUS_META[status] ?? { label: status, color: 'gray' }
 }
 
-export function stageColor(stage: string): string {
-  return STAGE_COLORS[stage] ?? '#86909c'
+/** Audit event types are dotted (`approval.consumed`); colour by the prefix. */
+export function eventTypeColor(eventType: string): string {
+  return EVENT_COLORS[eventType.split('.')[0]] ?? '#86909c'
 }
 
 export function isTerminalStatus(status: string): boolean {
@@ -302,11 +314,6 @@ export function formatTime(value: string | null | undefined): string {
   return time ? `${date} ${time}` : value
 }
 
-export function shortTrace(traceId: string): string {
-  if (!traceId) return '—'
-  return traceId.length > 12 ? `${traceId.slice(0, 8)}…` : traceId
-}
-
 export function prettyJson(value: unknown): string {
   if (value === null || value === undefined) return ''
   try {
@@ -314,4 +321,9 @@ export function prettyJson(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+export function shortHash(value: string | null | undefined): string {
+  if (!value) return '—'
+  return value.length > 16 ? `${value.slice(0, 12)}…` : value
 }
