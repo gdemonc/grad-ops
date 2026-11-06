@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计）；LLM 接入、Linux Runtime 隔离（uid/namespace/cgroup）与前端联调尚未实现。详见[当前实现状态](#当前实现状态)。
+> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 接入与 Linux Runtime 隔离（uid/namespace/cgroup）尚未实现。详见[当前实现状态](#当前实现状态)。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -80,11 +80,11 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
 | LLM 接入 | **未实现**：`StubPlanner` 只跑固定只读探针，不解释请求 |
 | Linux 隔离（uid 切换、namespace、cgroup、systemd） | **未实现**：目前只有进程组、超时、输出上限和环境白名单 |
-| 前端联调 | **未开始**：`frontend/vite.config.ts` 的代理仍指向 `127.0.0.1:8000` |
+| 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）通过，dev 代理与真实后端联调验证 |
 
 ### 已验证 / 未验证
 
-- **已验证（Windows + Git Bash）**：队列、租约与恢复、Shell 边界、证据引用、策略判定、契约摘要、审批的绑定与重放拒绝、执行、独立验证、补偿回滚、审计链，以及一条跑通全流程的端到端测试与一次真实二进制冒烟。
+- **已验证（Windows + Git Bash）**：队列、租约与恢复、Shell 边界、证据引用、策略判定、契约摘要、审批的绑定与重放拒绝、执行、独立验证、补偿回滚、审计链，以及一条跑通全流程的端到端测试与一次真实二进制冒烟；前端 `npm run build` 通过，dev 代理联调跑通了"创建任务 → Worker 调查 → 封存 → 审计校验"。
 - **未验证**：全部 Linux 专属行为。本仓库的二进制面向 Linux，但当前开发机没有可用的 Linux 环境；`GOOS=linux` 只做了交叉编译与 `go vet`，不能替代运行时验证。
 - 因此 `Linux Runtime` 一栏标记为未实现，而不是"应该可以"。
 
@@ -169,9 +169,27 @@ go test ./...
 | `GET` | `/api/tasks/{id}/evidence` | 证据列表（含内容哈希） |
 | `POST` | `/api/tasks/{id}/verify` | 执行后独立验证 |
 | `POST` | `/api/tasks/{id}/recover` | 验证失败后执行契约内补偿动作 |
+| `GET` | `/api/approvals?status=` | 审批队列（区分待执行 / 已消费 / 已过期 / 已拒绝） |
+| `GET` | `/api/proposals?task_id=&status=` | 提案列表 |
 | `GET` | `/api/proposals/{id}` | 提案与冻结的契约 |
 | `POST` | `/api/proposals/{id}/approvals` | 批准/拒绝，批准时返回一次性 token |
 | `POST` | `/api/proposals/{id}/execute` | 持 token 执行 |
+| `GET` | `/api/tasks/{id}/executions` | 执行记录 |
+| `GET` | `/api/tasks/{id}/verifications` | 验证记录 |
+| `GET` | `/api/safety` | 运行边界与防护闸门（未实现项标注为 warn） |
 | `GET` | `/api/audit/verify` | 审计链校验 |
 
 最小冒烟（只读闭环）：启动后创建任务，worker 会自动调查并封存；随后读取证据与时间线。已实现的 Go 测试在 Linux CI 通过之前，不应被当作 Linux 环境下的验证结果。
+
+### 控制台
+
+```bash
+cd frontend
+npm ci
+npm run build     # vue-tsc 类型检查 + vite 构建
+npm run dev       # 默认把 /api 代理到 127.0.0.1:8080
+```
+
+后端不在默认端口时用 `GRADOPS_BACKEND=http://127.0.0.1:18080 npm run dev` 覆盖代理目标。
+
+控制台里的"批准并执行"是两次调用：先取得一次性 token，再带着它调用执行接口，token 不落盘；刷新页面后 token 即丢失，需要等审批过期再重新批准，而不是偷偷保留一个可用凭证。
