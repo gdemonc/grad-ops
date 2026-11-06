@@ -22,6 +22,9 @@ type RuntimeInfo struct {
 	PolicyVersion   string   `json:"policy_version"`
 	ApprovalTTLMS   int64    `json:"approval_ttl_ms"`
 	WorkerEnabled   bool     `json:"worker_enabled"`
+	// RequireRunAsMatch reports whether the executor refuses contracts whose
+	// declared identity this process cannot assume.
+	RequireRunAsMatch bool `json:"require_run_as_match"`
 }
 
 type approvalItemDTO struct {
@@ -331,8 +334,8 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 				(time.Duration(info.ApprovalTTLMS) * time.Millisecond).String())},
 		{Key: "paths", Name: "路径边界", Status: "ok",
 			Detail: "动作声明的路径必须落在允许根目录内：" + strings.Join(info.AllowedRoots, ", ")},
-		{Key: "identity", Name: "运行身份", Status: "warn",
-			Detail: "契约要求声明非 root 的 run_as，但服务不会切换身份：脚本以服务进程身份运行"},
+		{Key: "identity", Name: "运行身份", Status: identityStatus(info.RequireRunAsMatch),
+			Detail: identityDetail(info.RequireRunAsMatch)},
 		{Key: "isolation", Name: "运行时隔离", Status: "warn",
 			Detail: "未实现：无 uid 切换、namespace、cgroup 或 systemd 单元；目前只有进程组、超时与输出上限"},
 		{Key: "audit", Name: "审计链", Status: "ok",
@@ -379,4 +382,21 @@ func parseLimit(r *http.Request, fallback int) (int, error) {
 
 func rawJSON(value string) []byte {
 	return []byte(value)
+}
+
+// identityStatus is "ok" only when the executor refuses contracts whose run_as
+// this process cannot assume. Without a runtime that can switch user, an
+// unenforced contract identity would be a claim rather than a boundary.
+func identityStatus(enforced bool) string {
+	if enforced {
+		return "ok"
+	}
+	return "warn"
+}
+
+func identityDetail(enforced bool) string {
+	if enforced {
+		return "已开启强制校验：契约的 run_as 必须等于当前进程身份，否则拒绝执行"
+	}
+	return "契约要求声明非 root 的 run_as，但服务不会切换身份：脚本以服务进程身份运行（可用 GRADOPS_REQUIRE_RUN_AS_MATCH 开启拒绝）"
 }

@@ -136,6 +136,11 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessWith(t, false)
+}
+
+func newHarnessWith(t *testing.T, enforceRunAs bool) *harness {
+	t.Helper()
 
 	bash := requireBash(t)
 	workdir := t.TempDir()
@@ -151,8 +156,9 @@ func newHarness(t *testing.T) *harness {
 	}
 
 	service, err := executor.New(db, engine, approvals, evidence.New(), executor.Config{
-		Bash:    bash,
-		BaseEnv: map[string]string{"PATH": os.Getenv("PATH"), "HOME": workdir},
+		Bash:              bash,
+		BaseEnv:           map[string]string{"PATH": os.Getenv("PATH"), "HOME": workdir},
+		RequireRunAsMatch: enforceRunAs,
 	}, executor.WithWorkDirMapper(func(string) string { return workdir }))
 	if err != nil {
 		t.Fatalf("executor: %v", err)
@@ -437,5 +443,43 @@ func TestTimeoutIsRecordedAsUnknown(t *testing.T) {
 	}
 	if !stage.Valid || stage.String != "outcome_unknown" {
 		t.Fatalf("expected failure stage outcome_unknown, got %v", stage)
+	}
+}
+func TestRunAsMismatchIsRefusedWhenEnforced(t *testing.T) {
+	h := newHarnessWith(t, true)
+	c, digest := buildContract(t, "printf 'restarted'", "R2")
+	taskID, proposalID := seed(t, h.db, c, digest)
+	_ = h.approve(t, taskID, proposalID, digest)
+
+	_, err := h.service.Execute(context.Background(), executor.Request{
+		ProposalID: proposalID,
+		Actor:      "worker-1",
+	})
+	if !errors.Is(err, executor.ErrRunAsUnsupported) {
+		t.Fatalf("expected ErrRunAsUnsupported, got %v", err)
+	}
+
+	// Nothing ran and nothing was closed: the operator fixes the contract or
+	// the runtime, they are not told the action completed.
+	status, _ := taskStatus(t, h.db, taskID)
+	if status != string(domain.StatusAwaitingApproval) {
+		t.Fatalf("expected the task to stay at AWAITING_APPROVAL, got %s", status)
+	}
+	var proposalStatus string
+	if err := h.db.QueryRow(`SELECT status FROM proposals WHERE id = ?`, proposalID).Scan(&proposalStatus); err != nil {
+		t.Fatalf("read proposal: %v", err)
+	}
+	if proposalStatus != "PENDING_APPROVAL" {
+		t.Fatalf("expected the proposal to stay pending, got %s", proposalStatus)
+	}
+
+	var events int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM audit_events WHERE event_type = 'execution.rejected'`,
+	).Scan(&events); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if events != 1 {
+		t.Fatalf("expected the refusal to be audited once, got %d", events)
 	}
 }

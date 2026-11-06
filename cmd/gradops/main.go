@@ -117,8 +117,9 @@ func run() error {
 	}
 
 	exec, err := executor.New(db, engine, approvals, evidenceStore, executor.Config{
-		Bash:    cfg.Bash,
-		BaseEnv: baseEnv,
+		Bash:              cfg.Bash,
+		BaseEnv:           baseEnv,
+		RequireRunAsMatch: cfg.RequireRunAsMatch,
 	}, executor.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
 		return fmt.Errorf("build executor: %w", err)
@@ -176,13 +177,14 @@ func run() error {
 		Version:         version,
 		MaxRequestBytes: cfg.MaxRequestBytes,
 		Runtime: api.RuntimeInfo{
-			Bash:            cfg.Bash,
-			WorkDir:         cfg.WorkDir,
-			ContractWorkDir: cfg.ContractWorkDir,
-			AllowedRoots:    cfg.AllowedRoots,
-			PolicyVersion:   cfg.PolicyVersion,
-			ApprovalTTLMS:   cfg.ApprovalTTL.Milliseconds(),
-			WorkerEnabled:   cfg.EnableWorker,
+			Bash:              cfg.Bash,
+			WorkDir:           cfg.WorkDir,
+			ContractWorkDir:   cfg.ContractWorkDir,
+			AllowedRoots:      cfg.AllowedRoots,
+			PolicyVersion:     cfg.PolicyVersion,
+			ApprovalTTLMS:     cfg.ApprovalTTL.Milliseconds(),
+			WorkerEnabled:     cfg.EnableWorker,
+			RequireRunAsMatch: cfg.RequireRunAsMatch,
 		},
 	})
 

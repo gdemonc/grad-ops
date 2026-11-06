@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/user"
 	"strings"
 	"time"
 
@@ -42,6 +43,9 @@ var (
 	ErrExpired = errors.New("contract expired")
 	// ErrInvalidRequest means the caller supplied an unusable request.
 	ErrInvalidRequest = errors.New("invalid execution request")
+	// ErrRunAsUnsupported means the contract asks for an identity this process
+	// cannot assume, and enforcement is on.
+	ErrRunAsUnsupported = errors.New("the contract requires an identity this process cannot assume")
 )
 
 // Outcome statuses.
@@ -97,6 +101,10 @@ type Service struct {
 	baseEnv    map[string]string
 	now        func() time.Time
 	mapWorkDir func(string) string
+	// requireRunAsMatch refuses contracts whose run_as this process cannot
+	// become. It is the fail-closed alternative to silently running an action
+	// as the service account while its contract says otherwise.
+	requireRunAsMatch bool
 }
 
 // Config is the executor's fixed configuration.
@@ -106,6 +114,10 @@ type Config struct {
 	// BaseEnv is merged under the contract environment. The contract wins on
 	// conflict, because it is what the approver saw.
 	BaseEnv map[string]string
+	// RequireRunAsMatch refuses to run a contract whose run_as differs from the
+	// process identity. Without a Linux runtime the process cannot switch user,
+	// so leaving this off means the contract's identity is aspirational.
+	RequireRunAsMatch bool
 }
 
 // New builds a service.
@@ -118,14 +130,15 @@ func New(db *store.DB, engine *policy.Engine, approvals *approval.Service, ev *e
 	}
 
 	service := &Service{
-		db:         db,
-		policy:     engine,
-		approvals:  approvals,
-		evidence:   ev,
-		bash:       cfg.Bash,
-		baseEnv:    cfg.BaseEnv,
-		now:        time.Now,
-		mapWorkDir: func(path string) string { return path },
+		db:                db,
+		policy:            engine,
+		approvals:         approvals,
+		evidence:          ev,
+		bash:              cfg.Bash,
+		baseEnv:           cfg.BaseEnv,
+		now:               time.Now,
+		mapWorkDir:        func(path string) string { return path },
+		requireRunAsMatch: cfg.RequireRunAsMatch,
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -184,6 +197,14 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 	if evaluation.Decision == policy.Deny {
 		s.reject(ctx, proposal, req.Actor, "policy denies the action", nil)
 		return Outcome{}, fmt.Errorf("%w: %s", ErrPolicyMismatch, evaluation.Reason)
+	}
+
+	// 2.5 Without a runtime that can switch user, the requested identity cannot
+	// be assumed. When enforcement is on, that is a refusal rather than an
+	// action quietly run as the service account.
+	if s.requireRunAsMatch && !identityMatches(proposal.Contract.RunAs) {
+		s.reject(ctx, proposal, req.Actor, "run_as cannot be assumed by this process", nil)
+		return Outcome{}, fmt.Errorf("%w: contract asks for %q", ErrRunAsUnsupported, proposal.Contract.RunAs)
 	}
 
 	// 3. The window the approver saw must still be open.
@@ -549,4 +570,28 @@ func nullable(value string) any {
 		return nil
 	}
 	return value
+}
+
+// identityMatches reports whether this process already runs as the requested
+// identity. Numeric uids and login names both count; a name may carry a domain
+// prefix that the contract does not.
+func identityMatches(runAs string) bool {
+	runAs = strings.TrimSpace(runAs)
+	if runAs == "" {
+		return false
+	}
+
+	current, err := user.Current()
+	if err != nil {
+		return false
+	}
+	if runAs == current.Uid || strings.EqualFold(runAs, current.Username) {
+		return true
+	}
+	if index := strings.LastIndex(current.Username, `\`); index >= 0 {
+		if runAs == current.Username[index+1:] {
+			return true
+		}
+	}
+	return false
 }

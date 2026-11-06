@@ -31,6 +31,7 @@ const (
 	envWorker          = "GRADOPS_WORKER"
 	envProbeTimeout    = "GRADOPS_PROBE_TIMEOUT"
 	envMaxOutput       = "GRADOPS_MAX_OUTPUT_BYTES"
+	envRequireRunAs    = "GRADOPS_REQUIRE_RUN_AS_MATCH"
 
 	defaultAddr      = "127.0.0.1:8080"
 	defaultLog       = "info"
@@ -76,6 +77,10 @@ type Config struct {
 	ProbeTimeout time.Duration
 	// MaxOutputBytes bounds each captured stream.
 	MaxOutputBytes int
+	// RequireRunAsMatch refuses actions whose declared identity this process
+	// cannot assume. Off by default because the service user is the identity
+	// used on a host without a runtime that can switch.
+	RequireRunAsMatch bool
 }
 
 // Load reads the environment, validates it, and returns the configuration.
@@ -173,6 +178,14 @@ func Load() (Config, error) {
 		cfg.MaxOutputBytes = n
 	}
 
+	if raw := strings.TrimSpace(os.Getenv(envRequireRunAs)); raw != "" {
+		value, err := parseBool(envRequireRunAs, raw)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.RequireRunAsMatch = value
+	}
+
 	if raw := strings.TrimSpace(os.Getenv(envWorker)); raw != "" {
 		switch strings.ToLower(raw) {
 		case "1", "true", "yes", "on":
@@ -206,5 +219,15 @@ func parseLevel(raw string) (slog.Level, error) {
 		return slog.LevelError, nil
 	default:
 		return 0, fmt.Errorf("%s must be one of debug, info, warn, error (got %q)", envLogLevel, raw)
+	}
+}
+func parseBool(name, raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be a boolean (got %q)", name, raw)
 	}
 }
