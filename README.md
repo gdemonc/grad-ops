@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** Phase 1（Go 项目骨架与持久化）进行中：配置、HTTP API、SQLite 迁移、任务状态机、审计哈希链与任务持久化已落地；Worker、Shell 执行、策略、审批与执行链尚未实现。
+> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 审计）；LLM 接入、Linux Runtime 隔离（uid/namespace/cgroup）、回滚补偿与前端联调尚未实现。详见[当前实现状态](#当前实现状态)。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -61,29 +61,81 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 
 ## 当前实现状态
 
-首期按 [Go + Linux 实施计划](docs/plans/2026-10-26-go-linux-implementation-plan.md) 分阶段落地。当前分支 `feat/phase1-go-skeleton` 只完成 Phase 1 的一部分：
+分支 `feat/phase1-go-skeleton`。每一项都对应代码与测试；没有测试覆盖的能力在表中明确标注。
 
 | 能力 | 状态 |
 | --- | --- |
 | 配置校验、JSON 日志、优雅关闭、健康检查 | 已实现 |
-| SQLite 版本化迁移与 8 张基础表 | 已实现 |
-| 任务状态机（单一迁移入口） | 已实现 |
-| 追加式审计哈希链与链校验 | 已实现 |
-| 任务创建、查询与时间线 API | 已实现 |
-| Worker 认领、租约、重试与崩溃恢复 | 已实现并测试；启动时回收过期租约；执行循环尚未接入（等待 Phase 2 调查处理器） |
-| 通用 Bash Session、Policy、审批、执行、验证与恢复 | 未实现 |
+| SQLite 版本化迁移、`STRICT` 表、事务封装 | 已实现 |
+| 任务状态机（单一迁移入口）、追加式审计哈希链 | 已实现 |
+| 任务、时间线、证据、提案 API | 已实现 |
+| Worker 认领、租约、重试、启动恢复、执行循环 | 已实现 |
+| 通用 Bash Session：超时、输出截断、调用预算、进程组回收、环境隔离 | 已实现 |
+| 调查：探针 → 证据、结论必须引用证据、提议动作 | 已实现（计划器是确定性替身） |
+| 确定性 Policy（R0–R4） | 已实现 |
+| 动作契约：规范化 JSON + SHA-256 摘要 | 已实现 |
+| 一次性审批：只存哈希、绑定契约摘要、单条 SQL 原子消费 | 已实现 |
+| Executor：重算摘要、复核策略、原子占用、执行 | 已实现 |
+| 独立验证：执行后重新观测，通过则封存 | 已实现 |
+| 回滚 / 补偿动作 | **未实现**：验证失败直接 `FAILED(verification)`，不会假装已回滚 |
+| LLM 接入 | **未实现**：`StubPlanner` 只跑固定只读探针，不解释请求 |
+| Linux 隔离（uid 切换、namespace、cgroup、systemd） | **未实现**：目前只有进程组、超时、输出上限和环境白名单 |
+| 前端联调 | **未开始**：`frontend/vite.config.ts` 的代理仍指向 `127.0.0.1:8000` |
 
-未实现的阶段不会假装可用：API 目前没有任何执行入口，任务停留在 `QUEUED`。
+### 已验证 / 未验证
+
+- **已验证（Windows + Git Bash）**：队列、租约与恢复、Shell 边界、证据引用、策略判定、契约摘要、审批的绑定与重放拒绝、执行、独立验证、审计链，以及一条跑通全流程的端到端测试与一次真实二进制冒烟。
+- **未验证**：全部 Linux 专属行为。本仓库的二进制面向 Linux，但当前开发机没有可用的 Linux 环境；`GOOS=linux` 只做了交叉编译与 `go vet`，不能替代运行时验证。
+- 因此 `Linux Runtime` 一栏标记为未实现，而不是"应该可以"。
+
+### 一条任务会经历什么
+
+```
+POST /api/tasks
+  └─ QUEUED，写入 investigate 作业
+       └─ Worker 认领（租约）→ INVESTIGATING
+            └─ 调查：只读探针 → evidence（内容寻址）
+                 ├─ 无副作用 → 结论必须引用 evidence → SEALED
+                 └─ 有副作用 → Policy 定价
+                      ├─ DENY  → REJECTED（不产生 proposal）
+                      └─ 通过  → 冻结契约 → AWAITING_APPROVAL
+                           └─ 人工批准 → 一次性 token（只存哈希）
+                                └─ POST /execute → EXECUTING
+                                     └─ 结果写入 execution_records + evidence
+                                          ├─ SUCCEEDED → VERIFYING
+                                          │    └─ 独立验证 → SEALED / FAILED
+                                          ├─ FAILED    → FAILED(execution)
+                                          └─ UNKNOWN   → FAILED(outcome_unknown)，永不重放
+```
 
 租约恢复的规则是显式的：过期租约只说明持有者停止续租，不说明工作是否完成。只读任务（`investigate`）会重新入队重试；带副作用的任务不会自动重放，而是记为 `UNKNOWN` 并把任务置为 `FAILED`（`failure_stage=outcome_unknown`），交由人工确认。
+
+### 已知限制（不是待办清单的装饰）
+
+- **计划器是替身**：默认部署只做只读调查并直接封存任务，不会产生提案。审批与执行路径通过测试与显式调用验证，而不是默认就会发生。
+- **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`；但服务本身没有能力切换到该身份，脚本以服务进程身份运行。真正的身份隔离属于未实现的 Runtime。
+- **策略是模式匹配**：危险命令检测是正则，不是 AST；它用于拒绝明显危险的动作，真正的边界是 Runtime，而 Runtime 尚未实现。
+- **审计链**只防御朴素篡改，DB 拥有者仍可重写整条链；信任边界见[威胁模型](docs/threat-model.md)。
 
 ## 本地运行与测试
 
 ```bash
 go build -o bin/gradops ./cmd/gradops
-GRADOPS_ADDR=127.0.0.1:8080 GRADOPS_DB_PATH=./data/gradops.db ./bin/gradops
+GRADOPS_DB_PATH=./data/gradops.db GRADOPS_ALLOWED_ROOTS=/var/log ./bin/gradops
 go test ./...
 ```
+
+Linux 上使用默认值即可；`GRADOPS_BASH` 默认 `/bin/bash`。当前开发机是 Windows，冒烟时用 Git Bash 并显式指定工作目录：
+
+```powershell
+$env:GRADOPS_BASH='C:\Program Files\Git\bin\bash.exe'
+$env:GRADOPS_WORK_DIR=(Resolve-Path .\data).Path
+$env:GRADOPS_CONTRACT_WORK_DIR='/work'
+$env:GRADOPS_ALLOWED_ROOTS='/var/log'
+go test ./...
+```
+
+需要 shell 的测试在找不到可用 Bash 时会 `t.Skip`，而不是假装通过。
 
 环境变量：
 
@@ -93,14 +145,30 @@ go test ./...
 | `GRADOPS_DB_PATH` | `./data/gradops.db` | SQLite 文件路径 |
 | `GRADOPS_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `GRADOPS_MAX_REQUEST_BYTES` | `1048576` | 请求体上限，最大 8 MiB |
+| `GRADOPS_BASH` | `/bin/bash` | 绝对路径；启动时校验存在且可执行 |
+| `GRADOPS_WORK_DIR` | `/` | 探针与动作运行的宿主目录 |
+| `GRADOPS_CONTRACT_WORK_DIR` | `/` | 写入契约的 POSIX 路径；开发机上与 `WORK_DIR` 不同 |
+| `GRADOPS_ALLOWED_ROOTS` | `/var/log` | 冒号分隔，动作可声明路径的上界 |
+| `GRADOPS_POLICY_VERSION` | `2026-11-01` | 写入契约，便于追溯 |
+| `GRADOPS_APPROVAL_TTL` | `15m` | 审批 token 有效期，最长 24h |
+| `GRADOPS_PROBE_TIMEOUT` | `10s` | 单次探针/验证命令超时 |
+| `GRADOPS_MAX_OUTPUT_BYTES` | `65536` | 每个输出流上限 |
+| `GRADOPS_WORKER` | `true` | 是否在本进程运行作业循环 |
 
 接口：
 
-- `GET /healthz`、`GET /api/health`
-- `POST /api/tasks`，请求体 `{"request_text": "..."}`
-- `GET /api/tasks?status=&limit=`
-- `GET /api/tasks/{id}`
-- `GET /api/tasks/{id}/timeline`
-- `GET /api/audit/verify`
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/healthz`、`/api/health` | 健康检查 |
+| `POST` | `/api/tasks` | 创建任务，请求体 `{"request_text": "..."}` |
+| `GET` | `/api/tasks?status=&limit=` | 任务列表 |
+| `GET` | `/api/tasks/{id}` | 任务详情 |
+| `GET` | `/api/tasks/{id}/timeline` | 审计时间线 |
+| `GET` | `/api/tasks/{id}/evidence` | 证据列表（含内容哈希） |
+| `POST` | `/api/tasks/{id}/verify` | 执行后独立验证 |
+| `GET` | `/api/proposals/{id}` | 提案与冻结的契约 |
+| `POST` | `/api/proposals/{id}/approvals` | 批准/拒绝，批准时返回一次性 token |
+| `POST` | `/api/proposals/{id}/execute` | 持 token 执行 |
+| `GET` | `/api/audit/verify` | 审计链校验 |
 
-已实现的 Go 测试在 Linux CI 通过之前，不应被当作 Linux 环境下的验证结果。
+最小冒烟（只读闭环）：启动后创建任务，worker 会自动调查并封存；随后读取证据与时间线。已实现的 Go 测试在 Linux CI 通过之前，不应被当作 Linux 环境下的验证结果。
