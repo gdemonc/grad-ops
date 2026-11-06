@@ -95,6 +95,17 @@ onMounted(() => {
                 </a-tag>
               </span>
             </div>
+            <div class="kv">
+              <span class="k">身份强制校验</span>
+              <span class="v">
+                <a-tag
+                  :color="store.safetyReport.runtime.require_run_as_match ? 'green' : 'orange'"
+                  size="small"
+                >
+                  {{ store.safetyReport.runtime.require_run_as_match ? '已开启' : '未开启' }}
+                </a-tag>
+              </span>
+            </div>
           </a-card>
 
           <a-card class="panel">

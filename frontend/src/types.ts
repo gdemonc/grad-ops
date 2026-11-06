@@ -159,6 +159,7 @@ export type SafetyRuntime = {
   policy_version: string
   approval_ttl_ms: number
   worker_enabled: boolean
+  require_run_as_match: boolean
 }
 
 export type SafetyGuard = {
