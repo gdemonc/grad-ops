@@ -60,16 +60,26 @@ func TestMigrateCreatesEveryTable(t *testing.T) {
 func TestMigrateIsIdempotent(t *testing.T) {
 	db := openTestDB(t)
 
+	count := func() int {
+		t.Helper()
+		var applied int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
+			t.Fatalf("count migrations: %v", err)
+		}
+		return applied
+	}
+
+	first := count()
+	if first == 0 {
+		t.Fatal("expected the initial migration set to be recorded")
+	}
+
 	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
 
-	var applied int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
-		t.Fatalf("count migrations: %v", err)
-	}
-	if applied != 1 {
-		t.Fatalf("expected 1 recorded migration, got %d", applied)
+	if second := count(); second != first {
+		t.Fatalf("re-running migrations applied %d extra migrations", second-first)
 	}
 }
 
