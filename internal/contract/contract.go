@@ -33,6 +33,15 @@ type Runtime struct {
 	MaxCalls       int64 `json:"max_calls"`
 }
 
+// Postcondition is the independent check that decides whether the action
+// achieved what it claimed. It is part of the contract, so the approver sees how
+// success will be judged before approving.
+type Postcondition struct {
+	Command        string `json:"command"`
+	ExpectExitCode int    `json:"expect_exit_code"`
+	StdoutContains string `json:"stdout_contains"`
+}
+
 // Contract is the immutable description of one side-effecting action.
 type Contract struct {
 	ProposalID    int64             `json:"proposal_id"`
@@ -48,6 +57,7 @@ type Contract struct {
 	Reversible    bool              `json:"reversible"`
 	PolicyRef     string            `json:"policy_ref"`
 	Runtime       Runtime           `json:"runtime"`
+	Postcondition Postcondition     `json:"postcondition"`
 	Risk          string            `json:"risk"`
 	PolicyVersion string            `json:"policy_version"`
 	ApprovalLevel string            `json:"approval_level"`
@@ -101,6 +111,10 @@ func (c *Contract) Canonicalize() error {
 	}
 	if c.Runtime.TimeoutMS <= 0 || c.Runtime.MaxOutputBytes <= 0 || c.Runtime.MaxCalls <= 0 {
 		return fmt.Errorf("contract runtime limits must all be positive")
+	}
+	c.Postcondition.Command = strings.TrimSpace(c.Postcondition.Command)
+	if c.Postcondition.Command == "" {
+		return fmt.Errorf("contract requires a postcondition command")
 	}
 
 	created, err := domain.ParseTime(c.CreatedAt)

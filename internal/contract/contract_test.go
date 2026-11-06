@@ -26,6 +26,7 @@ func validContract(t *testing.T) contract.Contract {
 		RunAs:         "gradops-agent",
 		Reversible:    true,
 		Runtime:       contract.Runtime{TimeoutMS: 30000, MaxOutputBytes: 65536, MaxCalls: 20},
+		Postcondition: contract.Postcondition{Command: "systemctl is-active nginx", StdoutContains: "active"},
 		Risk:          "R2",
 		PolicyVersion: "policy-2026-11-01",
 		ApprovalLevel: "human",
@@ -110,6 +111,7 @@ func TestDigestChangesWhenAnythingChanges(t *testing.T) {
 		"expiry":         func(c *contract.Contract) { c.ExpiresAt = domain.FormatTime(time.Now().Add(time.Hour)) },
 		"nonce":          func(c *contract.Contract) { c.Nonce = "ffffffffffffffffffffffffffffffff" },
 		"runtime":        func(c *contract.Contract) { c.Runtime.TimeoutMS = 60000 },
+		"postcondition":  func(c *contract.Contract) { c.Postcondition.StdoutContains = "inactive" },
 	}
 
 	for name, mutate := range mutations {

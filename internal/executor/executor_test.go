@@ -73,6 +73,7 @@ func buildContract(t *testing.T, script, risk string) (contract.Contract, string
 		RunAs:         "gradops-agent",
 		Reversible:    true,
 		Runtime:       contract.Runtime{TimeoutMS: 5000, MaxOutputBytes: 4096, MaxCalls: 5},
+		Postcondition: contract.Postcondition{Command: "printf ok"},
 		Risk:          risk,
 		PolicyVersion: "test-policy",
 		ApprovalLevel: "human",
