@@ -61,7 +61,7 @@ func testDB(t *testing.T) *store.DB {
 func seedExecuted(t *testing.T, db *store.DB, postcondition contract.Postcondition) (taskID, proposalID int64) {
 	t.Helper()
 
-	now := time.Date(2026, 11, 6, 5, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	c := contract.Contract{
 		Tool:          "bash",
 		Kind:          "service_control",

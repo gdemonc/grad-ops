@@ -15,7 +15,6 @@ func validContract(t *testing.T) contract.Contract {
 
 	created := time.Date(2026, 11, 6, 3, 0, 0, 0, time.UTC)
 	return contract.Contract{
-		ProposalID:    7,
 		TaskID:        3,
 		Tool:          "bash",
 		Kind:          "service_control",

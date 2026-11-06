@@ -62,7 +62,7 @@ func testDB(t *testing.T) *store.DB {
 func buildContract(t *testing.T, script, risk string) (contract.Contract, string) {
 	t.Helper()
 
-	now := time.Date(2026, 11, 6, 4, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	c := contract.Contract{
 		Tool:          "bash",
 		Kind:          string(policy.KindServiceControl),

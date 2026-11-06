@@ -43,8 +43,11 @@ type Postcondition struct {
 }
 
 // Contract is the immutable description of one side-effecting action.
+//
+// It deliberately carries no proposal id: the digest must describe the action,
+// not the row that happens to hold it, so the same action proposed twice yields
+// the same digest.
 type Contract struct {
-	ProposalID    int64             `json:"proposal_id"`
 	TaskID        int64             `json:"task_id"`
 	Tool          string            `json:"tool"`
 	Kind          string            `json:"kind"`
