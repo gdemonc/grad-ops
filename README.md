@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 审计）；LLM 接入、Linux Runtime 隔离（uid/namespace/cgroup）、回滚补偿与前端联调尚未实现。详见[当前实现状态](#当前实现状态)。
+> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计）；LLM 接入、Linux Runtime 隔离（uid/namespace/cgroup）与前端联调尚未实现。详见[当前实现状态](#当前实现状态)。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -77,14 +77,14 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 一次性审批：只存哈希、绑定契约摘要、单条 SQL 原子消费 | 已实现 |
 | Executor：重算摘要、复核策略、原子占用、执行 | 已实现 |
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
-| 回滚 / 补偿动作 | **未实现**：验证失败直接 `FAILED(verification)`，不会假装已回滚 |
+| 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
 | LLM 接入 | **未实现**：`StubPlanner` 只跑固定只读探针，不解释请求 |
 | Linux 隔离（uid 切换、namespace、cgroup、systemd） | **未实现**：目前只有进程组、超时、输出上限和环境白名单 |
 | 前端联调 | **未开始**：`frontend/vite.config.ts` 的代理仍指向 `127.0.0.1:8000` |
 
 ### 已验证 / 未验证
 
-- **已验证（Windows + Git Bash）**：队列、租约与恢复、Shell 边界、证据引用、策略判定、契约摘要、审批的绑定与重放拒绝、执行、独立验证、审计链，以及一条跑通全流程的端到端测试与一次真实二进制冒烟。
+- **已验证（Windows + Git Bash）**：队列、租约与恢复、Shell 边界、证据引用、策略判定、契约摘要、审批的绑定与重放拒绝、执行、独立验证、补偿回滚、审计链，以及一条跑通全流程的端到端测试与一次真实二进制冒烟。
 - **未验证**：全部 Linux 专属行为。本仓库的二进制面向 Linux，但当前开发机没有可用的 Linux 环境；`GOOS=linux` 只做了交叉编译与 `go vet`，不能替代运行时验证。
 - 因此 `Linux Runtime` 一栏标记为未实现，而不是"应该可以"。
 
@@ -103,7 +103,9 @@ POST /api/tasks
                                 └─ POST /execute → EXECUTING
                                      └─ 结果写入 execution_records + evidence
                                           ├─ SUCCEEDED → VERIFYING
-                                          │    └─ 独立验证 → SEALED / FAILED
+                                          │    └─ 独立验证 → SEALED
+                                          │          ├─ 失败且有补偿 → ROLLING_BACK → ROLLED_BACK / RECOVERY_FAILED
+                                          │          └─ 失败且无补偿 → FAILED(verification)
                                           ├─ FAILED    → FAILED(execution)
                                           └─ UNKNOWN   → FAILED(outcome_unknown)，永不重放
 ```
@@ -166,6 +168,7 @@ go test ./...
 | `GET` | `/api/tasks/{id}/timeline` | 审计时间线 |
 | `GET` | `/api/tasks/{id}/evidence` | 证据列表（含内容哈希） |
 | `POST` | `/api/tasks/{id}/verify` | 执行后独立验证 |
+| `POST` | `/api/tasks/{id}/recover` | 验证失败后执行契约内补偿动作 |
 | `GET` | `/api/proposals/{id}` | 提案与冻结的契约 |
 | `POST` | `/api/proposals/{id}/approvals` | 批准/拒绝，批准时返回一次性 token |
 | `POST` | `/api/proposals/{id}/execute` | 持 token 执行 |
