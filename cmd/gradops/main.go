@@ -175,6 +175,15 @@ func run() error {
 		Verifier:        verifier,
 		Version:         version,
 		MaxRequestBytes: cfg.MaxRequestBytes,
+		Runtime: api.RuntimeInfo{
+			Bash:            cfg.Bash,
+			WorkDir:         cfg.WorkDir,
+			ContractWorkDir: cfg.ContractWorkDir,
+			AllowedRoots:    cfg.AllowedRoots,
+			PolicyVersion:   cfg.PolicyVersion,
+			ApprovalTTLMS:   cfg.ApprovalTTL.Milliseconds(),
+			WorkerEnabled:   cfg.EnableWorker,
+		},
 	})
 
 	server := &http.Server{

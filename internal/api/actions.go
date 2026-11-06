@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gdemonc/grad-ops/internal/approval"
+	"github.com/gdemonc/grad-ops/internal/audit"
 	"github.com/gdemonc/grad-ops/internal/domain"
 	"github.com/gdemonc/grad-ops/internal/evidence"
 	"github.com/gdemonc/grad-ops/internal/executor"
@@ -195,6 +197,15 @@ func (h *handlers) approveProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A rejection has to move the task, not just record an opinion: otherwise
+	// the task waits forever for a decision that has already been made.
+	if decision == approval.Rejected {
+		if err := h.rejectTask(r.Context(), id, taskID, req.Approver); err != nil {
+			h.writeActionError(w, err)
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, decideResponse{
 		ApprovalID: grant.ApprovalID,
 		Decision:   string(grant.Decision),
@@ -377,4 +388,39 @@ func (h *handlers) writeActionError(w http.ResponseWriter, err error) {
 		h.deps.Logger.Error("action failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "internal error")
 	}
+}
+
+// rejectTask moves the task and its proposal out of the approval state. The
+// approval row already records who decided what; this is the state change that
+// makes the decision take effect.
+func (h *handlers) rejectTask(ctx context.Context, proposalID, taskID int64, approver string) error {
+	now := time.Now().UTC()
+
+	return h.deps.DB.Tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE proposals SET status = 'REJECTED' WHERE id = ? AND status = 'PENDING_APPROVAL'`,
+			proposalID); err != nil {
+			return fmt.Errorf("reject proposal: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE tasks SET status = ?, failure_stage = 'approval', updated_at = ?
+			  WHERE id = ? AND status = ?`,
+			string(domain.StatusRejected), domain.FormatTime(now),
+			taskID, string(domain.StatusAwaitingApproval)); err != nil {
+			return fmt.Errorf("reject task: %w", err)
+		}
+
+		payload, err := json.Marshal(map[string]any{"proposal_id": proposalID, "approver": approver})
+		if err != nil {
+			return fmt.Errorf("encode audit payload: %w", err)
+		}
+		return audit.Append(ctx, tx, &audit.Event{
+			TaskID:    &taskID,
+			Actor:     approver,
+			Type:      "task.rejected",
+			Message:   fmt.Sprintf("proposal %d was rejected", proposalID),
+			Payload:   payload,
+			CreatedAt: now,
+		})
+	})
 }

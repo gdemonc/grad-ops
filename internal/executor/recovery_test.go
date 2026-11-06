@@ -1,4 +1,4 @@
-﻿package executor_test
+package executor_test
 
 import (
 	"context"
@@ -185,4 +185,3 @@ func TestRecoveryCannotRunTwice(t *testing.T) {
 		t.Fatalf("expected the second rollback to be refused, got %v", err)
 	}
 }
-
