@@ -54,6 +54,32 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 - `verifier` 只读取执行后状态，不能复用调查阶段证据作为验证结论。
 - `audit` 追加事件并验证哈希链。审计完整性不等同于对主机 root 或数据库管理员的防篡改保证。
 
+### 3.1 当前实现对照
+
+规格里的目标包与当前代码的对应关系如下。"未实现"的包不会以空壳存在，也不会被其他包假装调用。
+
+| 包 | 现状 |
+| --- | --- |
+| `cmd/gradops` | 组装配置、日志、迁移、租约恢复、各服务、Worker 循环与 HTTP server，负责优雅关闭 |
+| `internal/config` | 环境变量读取与启动期校验，非法配置直接失败 |
+| `internal/domain` | 任务状态机、R0–R4 风险、时间编解码、错误分类 |
+| `internal/store` | SQLite 连接、嵌入式版本化迁移、`Tx` 事务封装 |
+| `internal/audit` | 追加式 SHA-256 链与链校验 |
+| `internal/worker` | 认领、租约、重试、启动恢复与执行循环 |
+| `internal/shell` | 受控 Bash：超时、输出截断、调用预算、进程组回收、环境白名单 |
+| `internal/policy` | 确定性 R0–R4 判定与审批要求，不导入 LLM |
+| `internal/contract` | 规范化 JSON、脚本摘要与契约摘要 |
+| `internal/approval` | 一次性审批凭证：只存哈希、绑定契约、原子消费 |
+| `internal/executor` | 唯一副作用入口；执行前重算摘要并复核策略；契约内补偿回滚 |
+| `internal/verify` | 执行后的独立只读观测 |
+| `internal/investigation` | 探针 → 证据 → grounding，结论引用真实 evidence ID |
+| `internal/evidence` | 内容寻址的证据存储与引用校验 |
+| `internal/task` | Task History 的创建、查询与时间线 |
+| `internal/api` | REST 接口与错误映射 |
+| `internal/e2e` | 贯穿真实组件的闭环测试 |
+
+尚未实现：规格中的 `llm`（模型客户端）、`command`（Shell AST 分析器）与 `linux`（systemd/cgroup/uid 隔离原语）包。因此模型目前是 `investigation.StubPlanner`，隔离边界目前只有进程组与超时。详见 [README 的当前实现状态](../README.md#当前实现状态)。
+
 ## 4. Linux Shell 与执行模型
 
 ### 4.1 Shell 是通用工具，不是业务工具白名单

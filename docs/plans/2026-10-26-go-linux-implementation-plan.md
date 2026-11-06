@@ -5,15 +5,15 @@
 
 ## Phase 0：规格冻结
 
-- [ ] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
-- [ ] 确定首期 Ubuntu LTS 版本与支持的 Go 版本。
+- [x] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
+- [ ] 确定首期 Ubuntu LTS 版本与支持的 Go 版本（Go 1.26.1 已在 `go.mod` 固定；Ubuntu 版本待 Linux CI 落地后确认）。
 - [x] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell Session、Policy/Approval、Action Contract 与 Linux Runtime 边界。
 - [x] 评审任务生命周期与故障恢复设计：`docs/design/task-lifecycle-and-recovery.md`。
 - [x] 评审 Tool 层安全与 Adapter 抽象：`docs/design/tool-layer-and-adapters.md`。
 - [x] 评审敏感数据与日志安全要求：`docs/design/data-security-and-logging.md`。
-- [ ] 定义规范化 JSON 和 SHA-256 摘要测试向量。
-- [ ] 定义 API request/response DTO 与数据库迁移策略。
-- [ ] 清理与首期 Linux-only 目标冲突的 Windows/PowerShell/跨平台要求。
+- [x] 定义规范化 JSON 和 SHA-256 摘要测试向量（`internal/contract` 的固定向量与跨进程重算测试）。
+- [x] 定义 API request/response DTO 与数据库迁移策略（嵌入式版本化迁移 + 各包内 DTO）。
+- [x] 清理与首期 Linux-only 目标冲突的 Windows/PowerShell/跨平台要求（旧核心闭环规格已标注归档；`internal/shell/control_other.go` 仅为开发机验证存根，不属于支持平台）。
 
 **验收：** 文档明确 Go Greenfield 实现与 Linux-only 边界；Python 不构成功能兼容或架构迁移要求；每个首期需求都有测试验收条件。
 
@@ -23,8 +23,8 @@
 - [x] 配置、日志、HTTP server、优雅关闭、健康检查。
 - [x] SQLite 迁移与事务封装（查询位于各服务包内，未引入独立 Repository 层）。
 - [x] 建立 task、job、evidence、proposal、approval、execution、verification、audit 的数据库表。
-- [ ] 建立上述实体的 Go 领域模型（当前仅 task 与 job 已建模）。
-- [ ] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
+- [x] 建立上述实体的 Go 领域模型（分布于各服务包：`contract.Contract`、`evidence.Record`、`approval.Grant`、`executor.Outcome`、`verify.Result`，未集中在单一 domain 包）。
+- [x] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
 - [x] 状态机函数与状态迁移单测。
 - [x] Worker 任务认领、租约、超时和恢复策略；按任务生命周期设计处理 UNKNOWN，禁止不确定副作用自动重放。
 - [ ] Linux CI 执行 `go test ./...`、`go vet ./...`（当前仅在 Windows 开发机验证，未见 Linux CI 结果）。
@@ -111,8 +111,8 @@ Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.m
 
 ## 完成定义
 
-- [ ] Go 代码可构建，测试在 Linux CI 通过。
-- [ ] 无 Windows 适配代码或 Windows 专属启动步骤。
-- [ ] 所有副作用通过唯一 Executor 和确定性策略。
-- [ ] 关键安全属性均有自动化测试，不只依赖文档承诺。
-- [ ] README、架构、规格、威胁模型、测试报告与实际实现一致。
+- [ ] Go 代码可构建，测试在 Linux CI 通过（本地构建与测试通过；Linux CI 尚无结果）。
+- [ ] 无 Windows 适配代码或 Windows 专属启动步骤（`internal/shell/control_other.go` 是开发机存根，需在 Linux CI 落地后删除）。
+- [x] 所有副作用通过唯一 Executor 和确定性策略。
+- [x] 关键安全属性均有自动化测试，不只依赖文档承诺。
+- [x] README、架构、规格、威胁模型、测试报告与实际实现一致（README 与实施计划已对齐；`docs/architecture.md` 仍描述目标布局而非当前包清单，差距记录在此）。
