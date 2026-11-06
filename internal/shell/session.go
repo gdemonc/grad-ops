@@ -1,8 +1,8 @@
 // Package shell runs bounded, non-interactive Bash scripts in a controlled
 // environment.
 //
-// A session provides expression — pipes, redirection, command substitution,
-// multi-line scripts — and the bookkeeping that keeps it bounded: a per-call
+// A session provides expression 鈥?pipes, redirection, command substitution,
+// multi-line scripts 鈥?and the bookkeeping that keeps it bounded: a per-call
 // timeout, capped output, and a call budget. It grants no authority. Whether a
 // script may run at all is decided by policy, and what it can touch is bounded
 // by the runtime that starts it.
@@ -80,41 +80,49 @@ type Session struct {
 
 // NewSession validates cfg and returns a session.
 func NewSession(cfg Config) (*Session, error) {
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
+	}
+	return &Session{cfg: cfg}, nil
+}
+
+// validateConfig holds the checks a session and a console both need.
+func validateConfig(cfg Config) error {
 	if !filepath.IsAbs(cfg.Executable) {
-		return nil, fmt.Errorf("%w: executable must be an absolute path", ErrInvalidConfig)
+		return fmt.Errorf("%w: executable must be an absolute path", ErrInvalidConfig)
 	}
 	info, err := os.Stat(cfg.Executable)
 	if err != nil {
-		return nil, fmt.Errorf("%w: executable %q: %v", ErrInvalidConfig, cfg.Executable, err)
+		return fmt.Errorf("%w: executable %q: %v", ErrInvalidConfig, cfg.Executable, err)
 	}
 	if info.IsDir() {
-		return nil, fmt.Errorf("%w: executable %q is a directory", ErrInvalidConfig, cfg.Executable)
+		return fmt.Errorf("%w: executable %q is a directory", ErrInvalidConfig, cfg.Executable)
 	}
 	if cfg.WorkDir == "" {
-		return nil, fmt.Errorf("%w: work directory must not be empty", ErrInvalidConfig)
+		return fmt.Errorf("%w: work directory must not be empty", ErrInvalidConfig)
 	}
 	if info, err := os.Stat(cfg.WorkDir); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("%w: work directory %q is not a directory", ErrInvalidConfig, cfg.WorkDir)
+		return fmt.Errorf("%w: work directory %q is not a directory", ErrInvalidConfig, cfg.WorkDir)
 	}
 	if cfg.Timeout <= 0 {
-		return nil, fmt.Errorf("%w: timeout must be positive", ErrInvalidConfig)
+		return fmt.Errorf("%w: timeout must be positive", ErrInvalidConfig)
 	}
 	if cfg.MaxOutputBytes <= 0 {
-		return nil, fmt.Errorf("%w: output limit must be positive", ErrInvalidConfig)
+		return fmt.Errorf("%w: output limit must be positive", ErrInvalidConfig)
 	}
 	if cfg.MaxCalls <= 0 {
-		return nil, fmt.Errorf("%w: call budget must be positive", ErrInvalidConfig)
+		return fmt.Errorf("%w: call budget must be positive", ErrInvalidConfig)
 	}
 	for key := range cfg.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return nil, fmt.Errorf("%w: invalid environment key %q", ErrInvalidConfig, key)
+			return fmt.Errorf("%w: invalid environment key %q", ErrInvalidConfig, key)
 		}
 		if strings.ContainsAny(cfg.Env[key], "\x00") {
-			return nil, fmt.Errorf("%w: environment value for %q contains NUL", ErrInvalidConfig, key)
+			return fmt.Errorf("%w: environment value for %q contains NUL", ErrInvalidConfig, key)
 		}
 	}
 
-	return &Session{cfg: cfg}, nil
+	return nil
 }
 
 // Calls reports how many scripts the session has run.
@@ -221,16 +229,18 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 }
 
 // environ renders the configured environment deterministically.
-func (s *Session) environ() []string {
-	keys := make([]string, 0, len(s.cfg.Env))
-	for key := range s.cfg.Env {
+func (s *Session) environ() []string { return environ(s.cfg.Env) }
+
+func environ(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
 	env := make([]string, 0, len(keys))
 	for _, key := range keys {
-		env = append(env, key+"="+s.cfg.Env[key])
+		env = append(env, key+"="+values[key])
 	}
 	return env
 }

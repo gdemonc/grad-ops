@@ -66,7 +66,7 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 | `internal/store` | SQLite 连接、嵌入式版本化迁移、`Tx` 事务封装 |
 | `internal/audit` | 追加式 SHA-256 链与链校验 |
 | `internal/worker` | 认领、租约、重试、启动恢复与执行循环 |
-| `internal/shell` | 受控 Bash：超时、输出截断、调用预算、进程组回收、环境白名单 |
+| `internal/shell` | 受控 Bash：超时、输出截断、调用预算、进程组回收、环境白名单。`Session` 每次调用一个新进程，`Console` 常驻一个进程并在调用之间保留状态；执行器用前者 |
 | `internal/policy` | 确定性 R0–R4 判定与审批要求，不导入 LLM |
 | `internal/contract` | 规范化 JSON、脚本摘要与契约摘要 |
 | `internal/approval` | 一次性审批凭证：只存哈希、绑定契约、原子消费 |
