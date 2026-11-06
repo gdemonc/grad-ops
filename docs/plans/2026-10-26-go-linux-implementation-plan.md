@@ -7,7 +7,10 @@
 
 - [ ] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
 - [ ] 确定首期 Ubuntu LTS 版本与支持的 Go 版本。
-- [ ] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell Session、Policy/Approval、Action Contract 与 Linux Runtime 边界。\n- [ ] 评审任务生命周期与故障恢复设计：\`docs/design/task-lifecycle-and-recovery.md\`。\n- [ ] 评审 Tool 层安全与 Adapter 抽象：\`docs/design/tool-layer-and-adapters.md\`。\n- [ ] 评审敏感数据与日志安全要求：\`docs/design/data-security-and-logging.md\`。
+- [x] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell Session、Policy/Approval、Action Contract 与 Linux Runtime 边界。
+- [x] 评审任务生命周期与故障恢复设计：`docs/design/task-lifecycle-and-recovery.md`。
+- [x] 评审 Tool 层安全与 Adapter 抽象：`docs/design/tool-layer-and-adapters.md`。
+- [x] 评审敏感数据与日志安全要求：`docs/design/data-security-and-logging.md`。
 - [ ] 定义规范化 JSON 和 SHA-256 摘要测试向量。
 - [ ] 定义 API request/response DTO 与数据库迁移策略。
 - [ ] 清理与首期 Linux-only 目标冲突的 Windows/PowerShell/跨平台要求。
@@ -16,14 +19,15 @@
 
 ## Phase 1：Go 项目骨架与持久化
 
-- [ ] 创建 `go.mod` 与 `cmd/gradops/main.go`。
-- [ ] 配置、日志、HTTP server、优雅关闭、健康检查。
-- [ ] SQLite 迁移、Repository 和事务封装。
-- [ ] 建立 task、job、evidence、proposal、approval、execution、verification、audit 的基础模型。
+- [x] 创建 `go.mod` 与 `cmd/gradops/main.go`。
+- [x] 配置、日志、HTTP server、优雅关闭、健康检查。
+- [x] SQLite 迁移与事务封装（查询位于各服务包内，未引入独立 Repository 层）。
+- [x] 建立 task、job、evidence、proposal、approval、execution、verification、audit 的数据库表。
+- [ ] 建立上述实体的 Go 领域模型（当前仅 task 与 job 已建模）。
 - [ ] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
-- [ ] 状态机函数与状态迁移单测。
-- [ ] Worker 任务认领、租约、超时和恢复策略；按任务生命周期设计处理 UNKNOWN，禁止不确定副作用自动重放。
-- [ ] Linux CI 执行 `go test ./...`、`go vet ./...`。
+- [x] 状态机函数与状态迁移单测。
+- [x] Worker 任务认领、租约、超时和恢复策略；按任务生命周期设计处理 UNKNOWN，禁止不确定副作用自动重放。
+- [ ] Linux CI 执行 `go test ./...`、`go vet ./...`（当前仅在 Windows 开发机验证，未见 Linux CI 结果）。
 
 **验收：** 空项目可在 Ubuntu 启动；创建任务、持久化、重启恢复与审计写入均有集成测试；任务时间线可回看关键步骤及其来源。
 
@@ -87,7 +91,8 @@
 
 Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.md`。这部分不应阻塞首期单机闭环。
 
-- [ ] 首期只允许简单、来源明确的记忆记录；Task History 是主要持久化事实来源。\n- [ ] Task History 稳定后，再实现结构化 Memory：来源、时间、适用范围、有效期和状态。
+- [ ] 首期只允许简单、来源明确的记忆记录；Task History 是主要持久化事实来源。
+- [ ] Task History 稳定后，再实现结构化 Memory：来源、时间、适用范围、有效期和状态。
 - [ ] 为用户偏好、环境事实和已验证经验提供关键词检索。
 - [ ] 增加过期识别、冲突标记、用户纠正/撤销能力。
 - [ ] 建立 Markdown Runbook 知识库，支持标题、标签和关键词检索，并返回原文位置。

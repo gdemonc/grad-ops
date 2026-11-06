@@ -97,7 +97,9 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 
 同一 Bash Session 的命令组合共享相应的任务/会话预算和 Runtime 边界；不要为管道的每个阶段启动独立沙箱，否则会破坏 Shell 语义并显著增加复杂度。
 
-## 5. 任务状态与事务\n\n状态转换、UNKNOWN 结果、Worker 租约与崩溃恢复的详细规划见 [任务生命周期与故障恢复设计](design/task-lifecycle-and-recovery.md)。
+## 5. 任务状态与事务
+
+状态转换、UNKNOWN 结果、Worker 租约与崩溃恢复的详细规划见 [任务生命周期与故障恢复设计](design/task-lifecycle-and-recovery.md)。
 
 任务状态机、审批消费、队列认领和审计写入必须有单一实现入口。状态变化与对应审计事件应尽可能在同一 SQLite 事务中提交。队列使用租约和明确的重试策略；发生崩溃时，先恢复任务状态并判断副作用是否已经发生，不可简单地重复执行不具幂等性的动作。
 
@@ -132,7 +134,9 @@ AST 分析可辅助风险提示、审批展示和审计，但不替代 Policy、
 
 具体路径与响应 schema 以实现前的 API 契约文档为准。API 不提供任意命令执行端点。
 
-## 8. 部署\n\n敏感数据分类、脱敏、日志/Evidence/History/Audit 分工、保留与清理要求见 [敏感数据与日志安全设计](design/data-security-and-logging.md)。
+## 8. 部署
+
+敏感数据分类、脱敏、日志/Evidence/History/Audit 分工、保留与清理要求见 [敏感数据与日志安全设计](design/data-security-and-logging.md)。
 
 - 单个 Go 服务二进制，配置从环境变量或受权限保护的配置文件读取。
 - SQLite 数据库和审计相关文件位于服务专用目录，权限最小化。
