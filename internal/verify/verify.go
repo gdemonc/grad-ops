@@ -232,7 +232,14 @@ func (s *Service) record(ctx context.Context, taskID, proposalID int64, c contra
 	taskStatus := domain.StatusSealed
 	failureStage := ""
 	if !result.Passed {
-		taskStatus = domain.StatusFailed
+		// A failed action with a defined compensation goes to ROLLING_BACK so
+		// the undo can run; without one there is nothing to try, and the task
+		// fails outright instead of pretending recovery is available.
+		if c.Compensation != nil {
+			taskStatus = domain.StatusRollingBack
+		} else {
+			taskStatus = domain.StatusFailed
+		}
 		failureStage = "verification"
 	}
 

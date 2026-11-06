@@ -283,6 +283,40 @@ func (h *handlers) verifyTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// recoverTask applies the contract's compensating action after a failed
+// verification.
+func (h *handlers) recoverTask(w http.ResponseWriter, r *http.Request) {
+	if h.deps.Executor == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "recovery is not configured")
+		return
+	}
+
+	id, err := parsePathID(r, "task id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	outcome, err := h.deps.Executor.Recover(r.Context(), id)
+	if err != nil {
+		h.writeActionError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, executeResponse{
+		ExecutionID: outcome.ExecutionID,
+		ProposalID:  outcome.ProposalID,
+		TaskID:      outcome.TaskID,
+		Status:      outcome.Status,
+		ExitCode:    outcome.ExitCode,
+		Stdout:      outcome.Stdout,
+		Stderr:      outcome.Stderr,
+		TimedOut:    outcome.TimedOut,
+		Truncated:   outcome.Truncated,
+		DurationMS:  outcome.Duration.Milliseconds(),
+	})
+}
+
 func (h *handlers) listEvidence(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Evidence == nil || h.deps.DB == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "evidence is not configured")
@@ -331,6 +365,7 @@ func (h *handlers) writeActionError(w http.ResponseWriter, err error) {
 		errors.Is(err, approval.ErrRejected), errors.Is(err, approval.ErrContractMismatch),
 		errors.Is(err, executor.ErrContractTampered), errors.Is(err, executor.ErrPolicyMismatch),
 		errors.Is(err, executor.ErrNotExecutable), errors.Is(err, executor.ErrExpired),
+		errors.Is(err, executor.ErrNoCompensation), errors.Is(err, executor.ErrNotRecoverable),
 		errors.Is(err, verify.ErrNotVerifiable):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 

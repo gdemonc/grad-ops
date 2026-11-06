@@ -56,6 +56,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}/timeline", h.timeline)
 	mux.HandleFunc("GET /api/tasks/{id}/evidence", h.listEvidence)
 	mux.HandleFunc("POST /api/tasks/{id}/verify", h.verifyTask)
+	mux.HandleFunc("POST /api/tasks/{id}/recover", h.recoverTask)
 	mux.HandleFunc("GET /api/proposals/{id}", h.getProposal)
 	mux.HandleFunc("POST /api/proposals/{id}/approvals", h.approveProposal)
 	mux.HandleFunc("POST /api/proposals/{id}/execute", h.executeProposal)

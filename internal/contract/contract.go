@@ -42,6 +42,15 @@ type Postcondition struct {
 	StdoutContains string `json:"stdout_contains"`
 }
 
+// Compensation is the action that undoes the main one when verification fails.
+// It is part of the contract, so the approver approves the undo along with the
+// action rather than being asked for a second decision after a failure.
+type Compensation struct {
+	Command        string `json:"command"`
+	ExpectExitCode int    `json:"expect_exit_code"`
+	StdoutContains string `json:"stdout_contains"`
+}
+
 // Contract is the immutable description of one side-effecting action.
 //
 // It deliberately carries no proposal id: the digest must describe the action,
@@ -61,6 +70,7 @@ type Contract struct {
 	PolicyRef     string            `json:"policy_ref"`
 	Runtime       Runtime           `json:"runtime"`
 	Postcondition Postcondition     `json:"postcondition"`
+	Compensation  *Compensation     `json:"compensation,omitempty"`
 	Risk          string            `json:"risk"`
 	PolicyVersion string            `json:"policy_version"`
 	ApprovalLevel string            `json:"approval_level"`
@@ -118,6 +128,12 @@ func (c *Contract) Canonicalize() error {
 	c.Postcondition.Command = strings.TrimSpace(c.Postcondition.Command)
 	if c.Postcondition.Command == "" {
 		return fmt.Errorf("contract requires a postcondition command")
+	}
+	if c.Compensation != nil {
+		c.Compensation.Command = strings.TrimSpace(c.Compensation.Command)
+		if c.Compensation.Command == "" {
+			return fmt.Errorf("contract compensation requires a command")
+		}
 	}
 
 	created, err := domain.ParseTime(c.CreatedAt)
