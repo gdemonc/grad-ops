@@ -192,4 +192,13 @@ npm run dev       # 默认把 /api 代理到 127.0.0.1:8080
 
 后端不在默认端口时用 `GRADOPS_BACKEND=http://127.0.0.1:18080 npm run dev` 覆盖代理目标。
 
+### 端到端演示
+
+```bash
+bash scripts/demo.sh                 # 目标平台：构建 → 启动 → 建任务 → 等待封存 → 打印证据、时间线与审计校验
+pwsh scripts/demo.ps1 -Addr 127.0.0.1:18080   # 开发机：Git Bash 作为 shell
+```
+
+两个脚本都会在任务没有到达 `SEALED` 或审计链校验失败时以非零码退出，所以它是一次冒烟测试，而不是"总会成功"的演示。开发机上要显式给出 `GRADOPS_BASH`（Git Bash 的绝对路径）与 `GRADOPS_WORK_DIR`。
+
 控制台里的"批准并执行"是两次调用：先取得一次性 token，再带着它调用执行接口，token 不落盘；刷新页面后 token 即丢失，需要等审批过期再重新批准，而不是偷偷保留一个可用凭证。
