@@ -18,11 +18,13 @@ func validContract(t *testing.T) contract.Contract {
 		ProposalID:    7,
 		TaskID:        3,
 		Tool:          "bash",
+		Kind:          "service_control",
 		Script:        "systemctl restart nginx\n",
 		WorkDir:       "/var/log",
 		Env:           map[string]string{"PATH": "/usr/bin:/bin", "HOME": "/var/lib/gradops"},
 		Paths:         []string{"/var/log//nginx-access.log", "/var/log/./nginx-error.log"},
 		RunAs:         "gradops-agent",
+		Reversible:    true,
 		Runtime:       contract.Runtime{TimeoutMS: 30000, MaxOutputBytes: 65536, MaxCalls: 20},
 		Risk:          "R2",
 		PolicyVersion: "policy-2026-11-01",
@@ -97,6 +99,8 @@ func TestDigestChangesWhenAnythingChanges(t *testing.T) {
 
 	mutations := map[string]func(*contract.Contract){
 		"script":         func(c *contract.Contract) { c.Script = "systemctl stop nginx" },
+		"kind":           func(c *contract.Contract) { c.Kind = "modify_file" },
+		"reversible":     func(c *contract.Contract) { c.Reversible = false },
 		"path":           func(c *contract.Contract) { c.Paths = []string{"/var/log/other.log"} },
 		"run identity":   func(c *contract.Contract) { c.RunAs = "someone-else" },
 		"work directory": func(c *contract.Contract) { c.WorkDir = "/etc/gradops" },
@@ -150,6 +154,7 @@ func TestVerifyRejectsTampering(t *testing.T) {
 func TestCanonicalizeRejectsInvalidContracts(t *testing.T) {
 	cases := map[string]func(*contract.Contract){
 		"missing tool":      func(c *contract.Contract) { c.Tool = " " },
+		"missing kind":      func(c *contract.Contract) { c.Kind = "" },
 		"missing script":    func(c *contract.Contract) { c.Script = "  \n" },
 		"relative workdir":  func(c *contract.Contract) { c.WorkDir = "var/log" },
 		"missing identity":  func(c *contract.Contract) { c.RunAs = "" },

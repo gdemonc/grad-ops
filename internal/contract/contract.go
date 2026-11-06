@@ -38,12 +38,15 @@ type Contract struct {
 	ProposalID    int64             `json:"proposal_id"`
 	TaskID        int64             `json:"task_id"`
 	Tool          string            `json:"tool"`
+	Kind          string            `json:"kind"`
 	Script        string            `json:"script"`
 	ScriptDigest  string            `json:"script_digest"`
 	WorkDir       string            `json:"work_dir"`
 	Env           map[string]string `json:"env"`
 	Paths         []string          `json:"paths"`
 	RunAs         string            `json:"run_as"`
+	Reversible    bool              `json:"reversible"`
+	PolicyRef     string            `json:"policy_ref"`
 	Runtime       Runtime           `json:"runtime"`
 	Risk          string            `json:"risk"`
 	PolicyVersion string            `json:"policy_version"`
@@ -70,6 +73,10 @@ func (c *Contract) Canonicalize() error {
 	if c.Tool == "" {
 		return fmt.Errorf("contract requires a tool")
 	}
+	if strings.TrimSpace(c.Kind) == "" {
+		return fmt.Errorf("contract requires an action kind")
+	}
+	c.Kind = strings.TrimSpace(c.Kind)
 	if strings.TrimSpace(c.Script) == "" {
 		return fmt.Errorf("contract requires a script")
 	}
