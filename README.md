@@ -35,6 +35,7 @@ Grad-Ops 是具备通用 Shell 能力、但不把主机权限交给模型的 Lin
 | [多主机 Go Agent 旧方案](docs/plans/2026-10-26-multi-host-go-agent.md) | 未来扩展参考；首期不实现 |
 | [核心闭环旧实施计划](docs/plans/2026-10-14-grad-ops-core-loop.md) | Python 版本的历史实现参考 |
 | [测试报告](docs/test-report.md) | 旧 Python 版本的历史测试基线，不等同于 Go 版测试结果 |
+| [测试矩阵与验证现状](docs/testing.md) | Go 版：属性 → 测试对照、运行环境、未覆盖清单 |
 
 ## 目标技术栈
 
