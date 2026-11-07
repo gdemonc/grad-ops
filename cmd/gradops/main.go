@@ -137,13 +137,14 @@ func run() error {
 	investigator, err := investigation.New(db, engine,
 		investigation.StubPlanner{Probes: defaultProbes},
 		investigation.Config{
-			Bash:            cfg.Bash,
-			BaseEnv:         baseEnv,
-			WorkDir:         cfg.WorkDir,
-			ContractWorkDir: cfg.ContractWorkDir,
-			Timeout:         cfg.ProbeTimeout,
-			MaxOutputBytes:  cfg.MaxOutputBytes,
-			MaxCalls:        len(defaultProbes),
+			Bash:             cfg.Bash,
+			BaseEnv:          baseEnv,
+			WorkDir:          cfg.WorkDir,
+			ContractWorkDir:  cfg.ContractWorkDir,
+			Timeout:          cfg.ProbeTimeout,
+			MaxOutputBytes:   cfg.MaxOutputBytes,
+			MaxCalls:         len(defaultProbes),
+			PersistentProbes: cfg.PersistentProbes,
 		})
 	if err != nil {
 		return fmt.Errorf("build investigation: %w", err)
@@ -185,6 +186,7 @@ func run() error {
 			ApprovalTTLMS:     cfg.ApprovalTTL.Milliseconds(),
 			WorkerEnabled:     cfg.EnableWorker,
 			RequireRunAsMatch: cfg.RequireRunAsMatch,
+			PersistentProbes:  cfg.PersistentProbes,
 		},
 	})
 

@@ -79,6 +79,11 @@ func seedTask(t *testing.T, db *store.DB, status domain.Status) int64 {
 
 func newService(t *testing.T, db *store.DB, planner investigation.Planner) *investigation.Service {
 	t.Helper()
+	return newServiceWith(t, db, planner, false)
+}
+
+func newServiceWith(t *testing.T, db *store.DB, planner investigation.Planner, persistent bool) *investigation.Service {
+	t.Helper()
 
 	workdir := t.TempDir()
 	engine, err := policy.New(policy.Config{Version: "test-policy", AllowedRoots: []string{"/var/log"}})
@@ -86,12 +91,13 @@ func newService(t *testing.T, db *store.DB, planner investigation.Planner) *inve
 		t.Fatalf("policy: %v", err)
 	}
 	service, err := investigation.New(db, engine, planner, investigation.Config{
-		Bash:           requireBash(t),
-		BaseEnv:        map[string]string{"PATH": os.Getenv("PATH"), "HOME": workdir},
-		WorkDir:        workdir,
-		Timeout:        5 * time.Second,
-		MaxOutputBytes: 4096,
-		MaxCalls:       5,
+		Bash:             requireBash(t),
+		BaseEnv:          map[string]string{"PATH": os.Getenv("PATH"), "HOME": workdir},
+		WorkDir:          workdir,
+		Timeout:          5 * time.Second,
+		MaxOutputBytes:   4096,
+		MaxCalls:         5,
+		PersistentProbes: persistent,
 	})
 	if err != nil {
 		t.Fatalf("investigation: %v", err)
@@ -279,5 +285,64 @@ func TestInvestigateRequiresTheInvestigatingState(t *testing.T) {
 
 	if _, err := service.Investigate(context.Background(), taskID); !errors.Is(err, investigation.ErrWrongState) {
 		t.Fatalf("expected ErrWrongState, got %v", err)
+	}
+}
+func TestPersistentProbesShareState(t *testing.T) {
+	probes := []string{
+		`export GRADOPS_PROBE_MARK=shared; mkdir -p nested; cd nested`,
+		`printf '%s:%s' "$GRADOPS_PROBE_MARK" "$PWD"`,
+	}
+
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+
+	service := newServiceWith(t, db, investigation.ScriptedPlanner{
+		Probes:    probes,
+		Summary:   "shared state observed",
+		Citations: []int{1, 2},
+	}, true)
+
+	if _, err := service.Investigate(context.Background(), taskID); err != nil {
+		t.Fatalf("investigate: %v", err)
+	}
+
+	var content string
+	if err := db.QueryRow(
+		`SELECT content FROM evidence WHERE task_id = ? ORDER BY rowid DESC LIMIT 1`, taskID,
+	).Scan(&content); err != nil {
+		t.Fatalf("read evidence: %v", err)
+	}
+	if !strings.Contains(content, "shared:") || !strings.Contains(content, "nested") {
+		t.Fatalf("probes did not share state: %q", content)
+	}
+}
+
+func TestIndependentProbesDoNotShareState(t *testing.T) {
+	probes := []string{
+		`export GRADOPS_PROBE_MARK=shared`,
+		`printf '%s' "$GRADOPS_PROBE_MARK"`,
+	}
+
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+
+	service := newService(t, db, investigation.ScriptedPlanner{
+		Probes:    probes,
+		Summary:   "state is not shared",
+		Citations: []int{1, 2},
+	})
+
+	if _, err := service.Investigate(context.Background(), taskID); err != nil {
+		t.Fatalf("investigate: %v", err)
+	}
+
+	var content string
+	if err := db.QueryRow(
+		`SELECT content FROM evidence WHERE task_id = ? ORDER BY rowid DESC LIMIT 1`, taskID,
+	).Scan(&content); err != nil {
+		t.Fatalf("read evidence: %v", err)
+	}
+	if strings.Contains(content, "shared") {
+		t.Fatalf("a one-shot probe inherited state it should not have: %q", content)
 	}
 }

@@ -106,6 +106,17 @@ onMounted(() => {
                 </a-tag>
               </span>
             </div>
+            <div class="kv">
+              <span class="k">探针会话</span>
+              <span class="v">
+                <a-tag
+                  :color="store.safetyReport.runtime.persistent_probes ? 'arcoblue' : 'gray'"
+                  size="small"
+                >
+                  {{ store.safetyReport.runtime.persistent_probes ? '常驻（共享状态）' : '每次独立进程' }}
+                </a-tag>
+              </span>
+            </div>
           </a-card>
 
           <a-card class="panel">

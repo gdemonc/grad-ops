@@ -3,7 +3,7 @@
 //
 // It is bounded and read-only: every command it runs is a probe, every probe
 // becomes evidence, and a conclusion must cite the probes it rests on. A side
-// effect is never performed here — at most it is described, priced by policy and
+// effect is never performed here 鈥?at most it is described, priced by policy and
 // handed to the approval flow.
 package investigation
 
@@ -98,6 +98,11 @@ type Config struct {
 	Timeout         time.Duration
 	MaxOutputBytes  int
 	MaxCalls        int
+	// PersistentProbes runs every probe of one investigation in the same Bash
+	// process, so a probe may rely on what an earlier probe exported or where it
+	// changed directory. Off by default: probes are supposed to be independent
+	// observations unless the operator asks otherwise.
+	PersistentProbes bool
 }
 
 // Result describes an investigation.
@@ -211,22 +216,22 @@ func (s *Service) loadRequest(ctx context.Context, taskID int64) (string, error)
 }
 
 // probe runs the plan's commands and returns their recordings.
+// probeRunner is the slice of shell.Session and shell.Console the investigation
+// needs; both satisfy it.
+type probeRunner interface {
+	Run(ctx context.Context, script string) (shell.Result, error)
+}
+
 func (s *Service) probe(ctx context.Context, probes []string) ([]evidence.Record, error) {
-	session, err := shell.NewSession(shell.Config{
-		Executable:     s.cfg.Bash,
-		WorkDir:        s.cfg.WorkDir,
-		Env:            s.cfg.BaseEnv,
-		Timeout:        s.cfg.Timeout,
-		MaxOutputBytes: s.cfg.MaxOutputBytes,
-		MaxCalls:       s.cfg.MaxCalls,
-	})
+	runner, release, err := s.probeShell()
 	if err != nil {
-		return nil, fmt.Errorf("prepare investigation shell: %w", err)
+		return nil, err
 	}
+	defer release()
 
 	records := make([]evidence.Record, 0, len(probes))
 	for _, command := range probes {
-		result, err := session.Run(ctx, command)
+		result, err := runner.Run(ctx, command)
 		if err != nil {
 			return nil, fmt.Errorf("run probe %q: %w", command, err)
 		}
@@ -519,4 +524,32 @@ func render(result shell.Result) string {
 		builder.WriteString("\n[output truncated]")
 	}
 	return builder.String()
+}
+
+// probeShell opens either a one-shot session or a persistent console. The
+// returned release function is never nil, so a console is closed even when a
+// probe fails.
+func (s *Service) probeShell() (probeRunner, func(), error) {
+	cfg := shell.Config{
+		Executable:     s.cfg.Bash,
+		WorkDir:        s.cfg.WorkDir,
+		Env:            s.cfg.BaseEnv,
+		Timeout:        s.cfg.Timeout,
+		MaxOutputBytes: s.cfg.MaxOutputBytes,
+		MaxCalls:       s.cfg.MaxCalls,
+	}
+
+	if s.cfg.PersistentProbes {
+		console, err := shell.NewConsole(cfg)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("prepare investigation console: %w", err)
+		}
+		return console, func() { _ = console.Close() }, nil
+	}
+
+	session, err := shell.NewSession(cfg)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("prepare investigation shell: %w", err)
+	}
+	return session, func() {}, nil
 }

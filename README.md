@@ -158,6 +158,7 @@ go test ./...
 | `GRADOPS_MAX_OUTPUT_BYTES` | `65536` | 每个输出流上限 |
 | `GRADOPS_WORKER` | `true` | 是否在本进程运行作业循环 |
 | `GRADOPS_REQUIRE_RUN_AS_MATCH` | `false` | 开启后契约声明的 `run_as` 必须等于当前进程身份，否则拒绝执行 |
+| `GRADOPS_PROBE_CONSOLE` | `false` | 开启后同一次调查的探针共享一个常驻 Bash 进程；默认每次探针独立进程 |
 
 接口：
 

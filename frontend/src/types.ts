@@ -160,6 +160,7 @@ export type SafetyRuntime = {
   approval_ttl_ms: number
   worker_enabled: boolean
   require_run_as_match: boolean
+  persistent_probes: boolean
 }
 
 export type SafetyGuard = {

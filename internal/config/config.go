@@ -32,6 +32,7 @@ const (
 	envProbeTimeout    = "GRADOPS_PROBE_TIMEOUT"
 	envMaxOutput       = "GRADOPS_MAX_OUTPUT_BYTES"
 	envRequireRunAs    = "GRADOPS_REQUIRE_RUN_AS_MATCH"
+	envProbeConsole    = "GRADOPS_PROBE_CONSOLE"
 
 	defaultAddr      = "127.0.0.1:8080"
 	defaultLog       = "info"
@@ -81,6 +82,10 @@ type Config struct {
 	// cannot assume. Off by default because the service user is the identity
 	// used on a host without a runtime that can switch.
 	RequireRunAsMatch bool
+	// PersistentProbes runs an investigation's probes in one Bash process, so
+	// they may share state. Off by default: independent probes are the clearer
+	// evidence.
+	PersistentProbes bool
 }
 
 // Load reads the environment, validates it, and returns the configuration.
@@ -184,6 +189,14 @@ func Load() (Config, error) {
 			return Config{}, err
 		}
 		cfg.RequireRunAsMatch = value
+	}
+
+	if raw := strings.TrimSpace(os.Getenv(envProbeConsole)); raw != "" {
+		value, err := parseBool(envProbeConsole, raw)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.PersistentProbes = value
 	}
 
 	if raw := strings.TrimSpace(os.Getenv(envWorker)); raw != "" {

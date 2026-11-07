@@ -42,6 +42,7 @@ go test ./... -count=1
 | 独立验证不复用调查证据，失败进入回滚 | `verify/verify_test.go`：`TestVerificationPassesAndSealsTheTask`、`TestVerificationFailureFailsTheTask`；`executor/recovery_test.go`：`TestRecoveryAppliesTheCompensation`、`TestRecoveryFailureIsRecordedAsSuch` |
 | Shell 边界：超时、截断、预算、进程组、环境隔离 | `shell/session_test.go`：`TestRunTimesOutAndReportsIt`、`TestRunTruncatesLargeOutput`、`TestRunEnforcesCallBudget`、`TestEnvironmentIsNotInherited` |
 | 常驻会话：状态保留、超时置死、不静默重启 | `shell/console_test.go`：`TestConsoleKeepsStateBetweenCalls`、`TestConsoleTimeoutKillsTheShell`、`TestConsoleReportsExitedShell` |
+| 探针共享会话状态（`GRADOPS_PROBE_CONSOLE` 开关，默认关闭） | `investigation/investigation_test.go`：`TestPersistentProbesShareState`、`TestIndependentProbesDoNotShareState` |
 | HTTP 层不绕过上述规则 | `api/actions_test.go`、`api/read_test.go`：`TestProposalLifecycleOverHTTP`、`TestUnknownProposalIsNotFound`、`TestRejectionClosesTheTask`、`TestSafetyReportAdmitsTheMissingRuntime` |
 | 整条闭环可用 | `e2e/loop_test.go`：`TestFullLoop` |
 

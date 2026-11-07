@@ -25,6 +25,9 @@ type RuntimeInfo struct {
 	// RequireRunAsMatch reports whether the executor refuses contracts whose
 	// declared identity this process cannot assume.
 	RequireRunAsMatch bool `json:"require_run_as_match"`
+	// PersistentProbes reports whether an investigation's probes share one
+	// shell.
+	PersistentProbes bool `json:"persistent_probes"`
 }
 
 type approvalItemDTO struct {
