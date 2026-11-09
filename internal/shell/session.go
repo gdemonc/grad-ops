@@ -1,8 +1,8 @@
 // Package shell runs bounded, non-interactive Bash scripts in a controlled
 // environment.
 //
-// A session provides expression 鈥?pipes, redirection, command substitution,
-// multi-line scripts 鈥?and the bookkeeping that keeps it bounded: a per-call
+// A session provides expression 閳?pipes, redirection, command substitution,
+// multi-line scripts 閳?and the bookkeeping that keeps it bounded: a per-call
 // timeout, capped output, and a call budget. It grants no authority. Whether a
 // script may run at all is decided by policy, and what it can touch is bounded
 // by the runtime that starts it.
@@ -51,6 +51,11 @@ type Config struct {
 	MaxOutputBytes int
 	// MaxCalls bounds how many scripts the session may run.
 	MaxCalls int
+	// ScratchDir is where a Console keeps the per-call capture files. Empty
+	// means the operating system's temporary directory, which is not
+	// necessarily writable by a service account; deployments that run a service
+	// should point it at a directory the service owns.
+	ScratchDir string
 }
 
 // Result is the outcome of one call.
@@ -112,6 +117,12 @@ func validateConfig(cfg Config) error {
 	}
 	if cfg.MaxCalls <= 0 {
 		return fmt.Errorf("%w: call budget must be positive", ErrInvalidConfig)
+	}
+	if cfg.ScratchDir != "" {
+		info, err := os.Stat(cfg.ScratchDir)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("%w: scratch directory %q is not a directory", ErrInvalidConfig, cfg.ScratchDir)
+		}
 	}
 	for key := range cfg.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") {

@@ -145,6 +145,7 @@ func run() error {
 			MaxOutputBytes:   cfg.MaxOutputBytes,
 			MaxCalls:         len(defaultProbes),
 			PersistentProbes: cfg.PersistentProbes,
+			ScratchDir:       cfg.DataDir,
 		})
 	if err != nil {
 		return fmt.Errorf("build investigation: %w", err)

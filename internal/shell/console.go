@@ -55,7 +55,7 @@ func NewConsole(cfg Config) (*Console, error) {
 		return nil, err
 	}
 
-	dir, err := os.MkdirTemp("", "gradops-console-")
+	dir, err := os.MkdirTemp(cfg.ScratchDir, "gradops-console-")
 	if err != nil {
 		return nil, fmt.Errorf("console scratch directory: %w", err)
 	}
@@ -209,7 +209,7 @@ func (c *Console) Run(ctx context.Context, script string) (Result, error) {
 	case err := <-readErr:
 		c.markDead()
 		if errors.Is(err, io.EOF) {
-			return Result{}, fmt.Errorf("%w: the script ended the shell", ErrConsoleDead)
+			return Result{}, fmt.Errorf("%w: the script ended the shell%s", ErrConsoleDead, c.diagnosticSuffix())
 		}
 		return Result{}, fmt.Errorf("read from console: %w", err)
 	case <-callCtx.Done():
@@ -229,7 +229,7 @@ func (c *Console) Run(ctx context.Context, script string) (Result, error) {
 	exitCode := parseEndMarker(codeLine)
 	if exitCode < 0 {
 		c.markDead()
-		return Result{}, fmt.Errorf("%w: unexpected output %q", ErrConsoleDead, strings.TrimSpace(codeLine))
+		return Result{}, fmt.Errorf("%w: unexpected output %q%s", ErrConsoleDead, strings.TrimSpace(codeLine), c.diagnosticSuffix())
 	}
 
 	result := Result{
@@ -312,4 +312,26 @@ func parseEndMarker(line string) int {
 // contain spaces (a temporary directory may).
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// Diagnostics is the shell's own stderr: whatever it said while starting or
+// while rejecting a script. The script's stderr is captured separately.
+func (c *Console) Diagnostics() string {
+	if c.diag == nil {
+		return ""
+	}
+	return c.diag.String()
+}
+
+// diagnosticSuffix appends the shell's own complaints to an error, so a failure
+// is not just "the shell is gone".
+func (c *Console) diagnosticSuffix() string {
+	diag := strings.TrimSpace(c.Diagnostics())
+	if diag == "" {
+		return ""
+	}
+	if len(diag) > 200 {
+		diag = diag[:200] + "..."
+	}
+	return ": " + diag
 }

@@ -3,7 +3,7 @@
 //
 // It is bounded and read-only: every command it runs is a probe, every probe
 // becomes evidence, and a conclusion must cite the probes it rests on. A side
-// effect is never performed here 鈥?at most it is described, priced by policy and
+// effect is never performed here 閳?at most it is described, priced by policy and
 // handed to the approval flow.
 package investigation
 
@@ -98,6 +98,9 @@ type Config struct {
 	Timeout         time.Duration
 	MaxOutputBytes  int
 	MaxCalls        int
+	// ScratchDir is where the persistent console keeps its capture files. Empty
+	// means the operating system's temporary directory.
+	ScratchDir string
 	// PersistentProbes runs every probe of one investigation in the same Bash
 	// process, so a probe may rely on what an earlier probe exported or where it
 	// changed directory. Off by default: probes are supposed to be independent
@@ -537,6 +540,7 @@ func (s *Service) probeShell() (probeRunner, func(), error) {
 		Timeout:        s.cfg.Timeout,
 		MaxOutputBytes: s.cfg.MaxOutputBytes,
 		MaxCalls:       s.cfg.MaxCalls,
+		ScratchDir:     s.cfg.ScratchDir,
 	}
 
 	if s.cfg.PersistentProbes {
