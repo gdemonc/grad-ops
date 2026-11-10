@@ -102,8 +102,8 @@ func TestCgroupTimeoutKillsTheGroup(t *testing.T) {
 
 func TestCgroupCPUQuotaIsApplied(t *testing.T) {
 	rawQuota := strings.TrimSpace(os.Getenv("GRADOPS_TEST_CGROUP_CPU_QUOTA_MICROS"))
-	if rawQuota == "" {
-		t.Skip("set GRADOPS_TEST_CGROUP_CPU_QUOTA_MICROS to exercise cpu.max")
+	if rawQuota == "" || rawQuota == "0" {
+		t.Skip("set a non-zero GRADOPS_TEST_CGROUP_CPU_QUOTA_MICROS to exercise cpu.max")
 	}
 	rawPeriod := strings.TrimSpace(os.Getenv("GRADOPS_TEST_CGROUP_CPU_PERIOD_MICROS"))
 	if rawPeriod == "" {

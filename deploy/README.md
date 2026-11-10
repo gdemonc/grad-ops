@@ -111,7 +111,8 @@ service, and run the script again; it then also checks the CPU controller and
 
 Both tests passed; the shell saw `memory.max=67108864` and `pids.max=32`, the
 timeout killed the cgroup, and no `gradops-*` child cgroup was left behind.
-CPU quota was left at 0 in this deployment, so `cpu.max` was not exercised.
+The same host was then restarted with `GRADOPS_CGROUP_CPU_QUOTA_MICROS=50000`
+and `cpu.max=50000 100000` passed; the controller list included `cpu`.
 
 The unit still does not add a network or mount namespace and does not make
 `/var/log` read-only. Those remain open work.

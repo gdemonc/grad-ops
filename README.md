@@ -82,7 +82,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 一次性审批：只存哈希、绑定契约摘要、单条 SQL 原子消费 | 已实现 |
 | Executor：重算摘要、复核策略、原子占用、执行 | 已实现 |
 | Linux 资源限制：CPU、地址空间、进程数、文件大小、文件描述符 | 已实现：通过 `prlimit` 在 shell 启动前应用，默认开启，可逐项设为 `0` 关闭 |
-| per-action cgroup v2 边界 | 已实现并验证：`GRADOPS_RUNTIME=cgroup-v2` 时每个 shell 启动在独立子 cgroup，设置内存/进程限制；真实 systemd delegated cgroup 上验证了 `memory.max`、`pids.max` 和超时清理。namespace/文件系统/网络隔离仍未实现 |
+| per-action cgroup v2 边界 | 已实现并验证：`GRADOPS_RUNTIME=cgroup-v2` 时每个 shell 启动在独立子 cgroup，设置内存/进程/CPU 限制；真实 systemd delegated cgroup 上验证了 `memory.max`、`pids.max`、`cpu.max` 和超时清理。namespace/文件系统/网络隔离仍未实现 |
 | 执行身份切换 | 部分实现：配置 `GRADOPS_EXECUTOR_USER` 后以该身份运行探针、动作和验证；非 root 无法切换时启动失败。未配置时仍以服务进程身份运行 |
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
@@ -94,8 +94,8 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 
 ### 已验证 / 未验证
 
-- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）；per-action cgroup v2 在真实 systemd delegated cgroup 上通过 shell 集成测试（`memory.max=67108864`、`pids.max=32`、超时清理、无残留子 cgroup）。
-- **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、cgroup CPU quota（当前配额为 0）、namespace、文件系统/网络隔离。这些不能因为测试套件全绿而被视为已实现。
+- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）；per-action cgroup v2 在真实 systemd delegated cgroup 上通过 shell 集成测试（`memory.max=67108864`、`pids.max=32`、`cpu.max=50000 100000`、超时清理、无残留子 cgroup）。
+- **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、cgroup 的 `cpuset`/`io` 控制器、namespace、文件系统/网络隔离。这些不能因为测试套件全绿而被视为已实现。
 - **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)）。
 - 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用此前的开发机结果，本次未重跑。
 
@@ -126,7 +126,7 @@ POST /api/tasks
 ### 已知限制（不是待办清单的装饰）
 
 - **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
-- **per-action cgroup**：`cgroup-v2` 模式已安装到真实 systemd 主机，并在 delegated cgroup 上用 shell 集成测试验证了子 cgroup 创建、`memory.max`/`pids.max` 生效和超时清理；默认仍是 `direct`，只使用 prlimit。systemd unit 已配置 `Delegate=yes`、`DelegateSubgroup=supervisor`。
+- **per-action cgroup**：`cgroup-v2` 模式已安装到真实 systemd 主机，并在 delegated cgroup 上用 shell 集成测试验证了子 cgroup 创建、`memory.max`/`pids.max`/`cpu.max` 生效和超时清理；默认仍是 `direct`，只使用 prlimit。systemd unit 已配置 `Delegate=yes`、`DelegateSubgroup=supervisor`。
 - **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`。配置 `GRADOPS_EXECUTOR_USER` 后，服务会解析该账号并真正切换 uid/gid；非 root 进程无法切换到其他用户时启动失败。未配置时仍以服务进程身份运行，此时设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 会拒绝身份不一致的契约并写入 `execution.rejected`。uid 切换的成功路径尚未在 root 环境实测。
 - **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前提供进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid 切换和可选的 per-action cgroup v2；没有 namespace、文件系统或网络隔离。
 - **资源限制依赖 util-linux**：`prlimit` 缺失时服务会拒绝启动；限制值默认适合只读探针和小文件，不保证兼容所有运维命令。
