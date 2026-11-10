@@ -147,6 +147,11 @@ func newHarnessWith(t *testing.T, enforceRunAs bool) *harness {
 
 func newHarnessRuntime(t *testing.T, enforceRunAs bool, runAs string) *harness {
 	t.Helper()
+	return newHarnessConfig(t, enforceRunAs, runAs, 0)
+}
+
+func newHarnessConfig(t *testing.T, enforceRunAs bool, runAs string, executionTimeout time.Duration) *harness {
+	t.Helper()
 
 	bash := requireBash(t)
 	workdir := t.TempDir()
@@ -166,6 +171,7 @@ func newHarnessRuntime(t *testing.T, enforceRunAs bool, runAs string) *harness {
 		BaseEnv:           map[string]string{"PATH": os.Getenv("PATH"), "HOME": workdir},
 		RequireRunAsMatch: enforceRunAs,
 		RunAs:             runAs,
+		ExecutionTimeout:  executionTimeout,
 	}, executor.WithWorkDirMapper(func(string) string { return workdir }))
 	if err != nil {
 		t.Fatalf("executor: %v", err)
@@ -595,5 +601,118 @@ func TestRejectsObserveContractWithWrite(t *testing.T) {
 	}
 	if executions != 0 {
 		t.Fatal("an observe contract with a write must not produce an execution record")
+	}
+}
+
+func TestExecutionCeilingIsRecordedAsUnknown(t *testing.T) {
+	h := newHarnessConfig(t, false, "", 100*time.Millisecond)
+	c, digest := buildContract(t, "sleep 5", "R2")
+	c.Runtime.TimeoutMS = 5000
+	if err := c.Canonicalize(); err != nil {
+		t.Fatalf("canonicalize: %v", err)
+	}
+	digest, err := c.Digest()
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	taskID, proposalID := seed(t, h.db, c, digest)
+	token := h.approve(t, taskID, proposalID, digest)
+
+	outcome, err := h.service.Execute(context.Background(), executor.Request{
+		ProposalID:    proposalID,
+		ApprovalToken: token,
+		Actor:         "worker-1",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Status != executor.StatusUnknown {
+		t.Fatalf("a timed out execution must be UNKNOWN, got %s", outcome.Status)
+	}
+
+	var records int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM execution_records WHERE proposal_id = ?`, proposalID).Scan(&records); err != nil {
+		t.Fatalf("count execution records: %v", err)
+	}
+	if records != 1 {
+		t.Fatalf("expected one execution record, got %d", records)
+	}
+	status, stage := taskStatus(t, h.db, taskID)
+	if status != string(domain.StatusFailed) || !stage.Valid || stage.String != "outcome_unknown" {
+		t.Fatalf("task status = %s stage = %v, want FAILED/outcome_unknown", status, stage)
+	}
+}
+
+func TestCancelledRequestStillRecordsTheUnknownOutcome(t *testing.T) {
+	h := newHarness(t)
+	c, digest := buildContract(t, "sleep 5", "R2")
+	c.Runtime.TimeoutMS = 5000
+	if err := c.Canonicalize(); err != nil {
+		t.Fatalf("canonicalize: %v", err)
+	}
+	digest, err := c.Digest()
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	taskID, proposalID := seed(t, h.db, c, digest)
+	token := h.approve(t, taskID, proposalID, digest)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type result struct {
+		outcome executor.Outcome
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		outcome, err := h.service.Execute(ctx, executor.Request{
+			ProposalID:    proposalID,
+			ApprovalToken: token,
+			Actor:         "worker-1",
+		})
+		done <- result{outcome: outcome, err: err}
+	}()
+
+	// Wait until the approval has been consumed, so cancellation happens while
+	// the shell is running rather than during the claim.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var consumed int
+		if err := h.db.QueryRow(
+			`SELECT COUNT(*) FROM approvals WHERE proposal_id = ? AND consumed_at IS NOT NULL`,
+			proposalID,
+		).Scan(&consumed); err != nil {
+			t.Fatalf("read approval: %v", err)
+		}
+		if consumed > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("approval was not consumed in time")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("execute: %v", got.err)
+		}
+		if got.outcome.Status != executor.StatusUnknown {
+			t.Fatalf("a cancelled execution must be UNKNOWN, got %s", got.outcome.Status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("execution did not stop after cancellation")
+	}
+
+	var records int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM execution_records WHERE proposal_id = ?`, proposalID).Scan(&records); err != nil {
+		t.Fatalf("count execution records: %v", err)
+	}
+	if records != 1 {
+		t.Fatalf("the outcome must survive cancellation; got %d records", records)
 	}
 }

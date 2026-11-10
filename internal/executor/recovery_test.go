@@ -185,3 +185,30 @@ func TestRecoveryCannotRunTwice(t *testing.T) {
 		t.Fatalf("expected the second rollback to be refused, got %v", err)
 	}
 }
+
+func TestRecoveryCeilingIsRecordedAsFailure(t *testing.T) {
+	h := newHarnessConfig(t, false, "", 100*time.Millisecond)
+	taskID, proposalID := seedRecoverable(t, h.db, &contract.Compensation{
+		Command: "sleep 5",
+	})
+
+	outcome, err := h.service.Recover(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if outcome.Status != executor.StatusRecoveryFailed {
+		t.Fatalf("expected RECOVERY_FAILED, got %s", outcome.Status)
+	}
+
+	var records int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM execution_records WHERE proposal_id = ?`, proposalID).Scan(&records); err != nil {
+		t.Fatalf("count records: %v", err)
+	}
+	if records != 1 {
+		t.Fatalf("expected the rollback outcome to be recorded, got %d records", records)
+	}
+	status, _ := taskStatus(t, h.db, taskID)
+	if status != string(domain.StatusRecoveryFailed) {
+		t.Fatalf("task status = %s, want RECOVERY_FAILED", status)
+	}
+}

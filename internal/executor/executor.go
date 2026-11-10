@@ -111,8 +111,9 @@ type Service struct {
 	requireRunAsMatch bool
 	// runAs is the identity the executor was configured to assume. When set,
 	// the contract must name the same identity and the shell switches to it.
-	runAs  string
-	limits shell.Limits
+	runAs            string
+	limits           shell.Limits
+	executionTimeout time.Duration
 }
 
 // Config is the executor's fixed configuration.
@@ -132,6 +133,9 @@ type Config struct {
 	RunAs string
 	// Limits bounds each action's shell process.
 	Limits shell.Limits
+	// ExecutionTimeout is an emergency ceiling on one execution, on top of the
+	// contract's own runtime timeout. Zero uses the default.
+	ExecutionTimeout time.Duration
 }
 
 // New builds a service.
@@ -155,6 +159,13 @@ func New(db *store.DB, engine *policy.Engine, approvals *approval.Service, ev *e
 		requireRunAsMatch: cfg.RequireRunAsMatch,
 		runAs:             strings.TrimSpace(cfg.RunAs),
 		limits:            cfg.Limits,
+		executionTimeout:  cfg.ExecutionTimeout,
+	}
+	if service.executionTimeout <= 0 {
+		service.executionTimeout = 2 * time.Minute
+	}
+	if service.executionTimeout > 24*time.Hour {
+		return nil, fmt.Errorf("%w: execution timeout must not exceed 24h", ErrInvalidRequest)
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -280,8 +291,15 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("prepare shell: %w", err)
 	}
 
+	// The contract carries its own runtime timeout. This ceiling also covers a
+	// shell that starts but does not make progress, and it is deliberately
+	// separate from the request context: a client disconnect must not prevent
+	// the outcome from being recorded.
+	runCtx, cancelRun := context.WithTimeout(ctx, s.executionTimeout)
+	defer cancelRun()
+
 	started := s.now().UTC()
-	result, runErr := session.Run(ctx, proposal.Contract.Script)
+	result, runErr := session.Run(runCtx, proposal.Contract.Script)
 	finished := s.now().UTC()
 
 	outcome := Outcome{
@@ -297,7 +315,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 	}
 
 	switch {
-	case runErr != nil && ctx.Err() != nil:
+	case runErr != nil && (ctx.Err() != nil || runCtx.Err() != nil):
 		// The process was interrupted while the script may have been running.
 		outcome.Status = StatusUnknown
 	case runErr != nil:
@@ -311,7 +329,12 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 		outcome.Status = StatusFailed
 	}
 
-	if err := s.record(ctx, proposal, outcome, started, finished, req.Actor); err != nil {
+	// The side effect may already have happened. Record it even when the
+	// request context was cancelled; otherwise the database would claim that
+	// nothing ran.
+	recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancelRecord()
+	if err := s.record(recordCtx, proposal, outcome, started, finished, req.Actor); err != nil {
 		return outcome, err
 	}
 	return outcome, nil

@@ -75,9 +75,12 @@ func (s *Service) Recover(ctx context.Context, taskID int64) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("prepare recovery shell: %w", err)
 	}
 
+	runCtx, cancelRun := context.WithTimeout(ctx, s.executionTimeout)
+	defer cancelRun()
+
 	started := s.now().UTC()
 	compensation := c.Compensation
-	result, runErr := session.Run(ctx, compensation.Command)
+	result, runErr := session.Run(runCtx, compensation.Command)
 	finished := s.now().UTC()
 
 	outcome := Outcome{
@@ -98,14 +101,22 @@ func (s *Service) Recover(ctx context.Context, taskID int64) (Outcome, error) {
 	switch {
 	case passed:
 		outcome.Status = StatusRecovered
-	case ctx.Err() != nil:
+	case ctx.Err() != nil || runCtx.Err() != nil:
 		outcome.Status = StatusRecoveryFailed
-		outcome.Stderr = ctx.Err().Error()
+		if runCtx.Err() != nil {
+			outcome.Stderr = runCtx.Err().Error()
+		} else {
+			outcome.Stderr = ctx.Err().Error()
+		}
 	default:
 		outcome.Status = StatusRecoveryFailed
 	}
 
-	if err := s.recordRecovery(ctx, proposalID, taskID, c, outcome, started, finished); err != nil {
+	// A rollback is a side effect too. Persist its result even if the caller
+	// went away while the compensation was running.
+	recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancelRecord()
+	if err := s.recordRecovery(recordCtx, proposalID, taskID, c, outcome, started, finished); err != nil {
 		return outcome, err
 	}
 	return outcome, nil
