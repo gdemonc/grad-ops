@@ -8,7 +8,7 @@ import {
 import { onMounted } from 'vue'
 import { useTasksStore } from '../stores/tasks'
 import { guardStatusMeta } from '../types'
-import type { SafetyGuard, SafetyReport } from '../types'
+import type { SafetyGuard, SafetyReport, SafetyRuntime } from '../types'
 
 const store = useTasksStore()
 
@@ -33,6 +33,21 @@ function guardIcon(status: SafetyGuard['status']) {
 function ttlText(ms: number): string {
   if (ms % 60000 === 0) return `${ms / 60000} 分钟`
   return `${Math.round(ms / 1000)} 秒`
+}
+
+function bytesText(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`
+  return `${Math.round(bytes / (1024 * 1024))} MiB`
+}
+
+function limitsText(runtime: SafetyRuntime): string {
+  const parts: string[] = []
+  if (runtime.cpu_limit_ms > 0) parts.push(`CPU ${ttlText(runtime.cpu_limit_ms)}`)
+  if (runtime.address_space_bytes > 0) parts.push(`内存 ${bytesText(runtime.address_space_bytes)}`)
+  if (runtime.process_limit > 0) parts.push(`进程 ${runtime.process_limit}`)
+  if (runtime.file_size_bytes > 0) parts.push(`文件 ${bytesText(runtime.file_size_bytes)}`)
+  if (runtime.open_file_limit > 0) parts.push(`fd ${runtime.open_file_limit}`)
+  return parts.length > 0 ? parts.join(' / ') : '未启用'
 }
 
 onMounted(() => {
@@ -96,6 +111,17 @@ onMounted(() => {
               </span>
             </div>
             <div class="kv">
+              <span class="k">执行身份</span>
+              <span class="v">
+                <a-tag
+                  :color="store.safetyReport.runtime.executor_user ? 'green' : 'orange'"
+                  size="small"
+                >
+                  {{ store.safetyReport.runtime.executor_user || '服务进程身份' }}
+                </a-tag>
+              </span>
+            </div>
+            <div class="kv">
               <span class="k">身份强制校验</span>
               <span class="v">
                 <a-tag
@@ -103,6 +129,26 @@ onMounted(() => {
                   size="small"
                 >
                   {{ store.safetyReport.runtime.require_run_as_match ? '已开启' : '未开启' }}
+                </a-tag>
+              </span>
+            </div>
+            <div class="kv">
+              <span class="k">资源限制</span>
+              <span class="v mono">{{ limitsText(store.safetyReport.runtime) }}</span>
+            </div>
+            <div class="kv">
+              <span class="k">调查计划器</span>
+              <span class="v">
+                <a-tag :color="store.safetyReport.runtime.planner === 'model' ? 'arcoblue' : 'gray'" size="small">
+                  {{ store.safetyReport.runtime.planner === 'model' ? '模型 + 校验' : '确定性替身' }}
+                </a-tag>
+              </span>
+            </div>
+            <div class="kv">
+              <span class="k">API 认证</span>
+              <span class="v">
+                <a-tag :color="store.safetyReport.runtime.api_token_set ? 'green' : 'orange'" size="small">
+                  {{ store.safetyReport.runtime.api_token_set ? 'Bearer token' : '回环地址，无认证' }}
                 </a-tag>
               </span>
             </div>

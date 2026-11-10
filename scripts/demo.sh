@@ -15,6 +15,10 @@ WORKDIR="$(mktemp -d)"
 BIN="$WORKDIR/gradops"
 DB="$WORKDIR/gradops.db"
 LOG="$WORKDIR/server.log"
+AUTH=()
+if [[ -n "${GRADOPS_API_TOKEN:-}" ]]; then
+  AUTH=(-H "Authorization: Bearer ${GRADOPS_API_TOKEN}")
+fi
 
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -51,6 +55,7 @@ done
 
 echo "==> creating a task"
 TASK_ID="$(curl -fsS -X POST "http://$ADDR/api/tasks" \
+  "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d '{"request_text":"check the disk and report usage"}' | sed -n 's/.*"id":\([0-9]*\).*/\1/p')"
 if [[ -z "$TASK_ID" ]]; then
@@ -62,7 +67,7 @@ echo "    task $TASK_ID"
 echo "==> waiting for the worker"
 STATUS=""
 for _ in $(seq 1 100); do
-  STATUS="$(curl -fsS "http://$ADDR/api/tasks/$TASK_ID" | sed -n 's/.*"status":"\([A-Z_]*\)".*/\1/p')"
+  STATUS="$(curl -fsS "${AUTH[@]}" "http://$ADDR/api/tasks/$TASK_ID" | sed -n 's/.*"status":"\([A-Z_]*\)".*/\1/p')"
   case "$STATUS" in
     SEALED|FAILED|REJECTED) break ;;
   esac
@@ -71,13 +76,13 @@ done
 
 echo "    status: $STATUS"
 echo "==> evidence"
-curl -fsS "http://$ADDR/api/tasks/$TASK_ID/evidence"
+curl -fsS "${AUTH[@]}" "http://$ADDR/api/tasks/$TASK_ID/evidence"
 echo
 echo "==> timeline"
-curl -fsS "http://$ADDR/api/tasks/$TASK_ID/timeline"
+curl -fsS "${AUTH[@]}" "http://$ADDR/api/tasks/$TASK_ID/timeline"
 echo
 echo "==> audit chain"
-AUDIT="$(curl -fsS "http://$ADDR/api/audit/verify")"
+AUDIT="$(curl -fsS "${AUTH[@]}" "http://$ADDR/api/audit/verify")"
 echo "$AUDIT"
 
 if [[ "$STATUS" != "SEALED" ]]; then

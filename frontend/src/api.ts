@@ -19,6 +19,15 @@ const client = axios.create({
   timeout: 20000,
 })
 
+// A deployment that sets GRADOPS_API_TOKEN can store the same token in this
+// browser key. It is never baked into the bundle by default.
+if (typeof window !== 'undefined') {
+  const token = window.localStorage.getItem('gradops_api_token')
+  if (token) {
+    client.defaults.headers.common.Authorization = `Bearer ${token}`
+  }
+}
+
 export function errorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const data = err.response?.data as { error?: { code?: string; message?: string } } | undefined

@@ -11,8 +11,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gdemonc/grad-ops/internal/shell"
 )
 
 // Environment variable names. They are prefixed with GRADOPS_ so a deployment
@@ -33,17 +36,57 @@ const (
 	envMaxOutput       = "GRADOPS_MAX_OUTPUT_BYTES"
 	envRequireRunAs    = "GRADOPS_REQUIRE_RUN_AS_MATCH"
 	envProbeConsole    = "GRADOPS_PROBE_CONSOLE"
+	envInvestigation   = "GRADOPS_INVESTIGATION_TIMEOUT"
+	envAPIToken        = "GRADOPS_API_TOKEN"
+	envExecutorUser    = "GRADOPS_EXECUTOR_USER"
+	envPrlimit         = "GRADOPS_PRLIMIT"
+	envLimitCPU        = "GRADOPS_RLIMIT_CPU"
+	envLimitAS         = "GRADOPS_RLIMIT_AS_BYTES"
+	envLimitNProc      = "GRADOPS_RLIMIT_NPROC"
+	envLimitFSize      = "GRADOPS_RLIMIT_FSIZE_BYTES"
+	envLimitNoFile     = "GRADOPS_RLIMIT_NOFILE"
+	envPlanner         = "GRADOPS_PLANNER"
+	envLLMBaseURL      = "GRADOPS_LLM_BASE_URL"
+	envLLMAPIKey       = "GRADOPS_LLM_API_KEY"
+	envLLMModel        = "GRADOPS_LLM_MODEL"
+	envLLMTimeout      = "GRADOPS_LLM_TIMEOUT"
+	envLLMResponse     = "GRADOPS_LLM_MAX_RESPONSE_BYTES"
+	envLLMMaxProbes    = "GRADOPS_LLM_MAX_PROBES"
+	envLLMMaxObs       = "GRADOPS_LLM_MAX_OBSERVATION_BYTES"
+	envLLMMaxTokens    = "GRADOPS_LLM_MAX_TOKENS"
 
-	defaultAddr      = "127.0.0.1:8080"
-	defaultLog       = "info"
-	defaultBash      = "/bin/bash"
-	defaultWorkDir   = "/"
-	defaultPolicy    = "2026-11-01"
-	defaultRoot      = "/var/log"
-	defaultTTL       = 15 * time.Minute
-	defaultProbe     = 10 * time.Second
-	defaultMaxOutput = 64 << 10
-	maxBodyLimit     = 8 << 20
+	defaultAddr          = "127.0.0.1:8080"
+	defaultLog           = "info"
+	defaultBash          = "/bin/bash"
+	defaultWorkDir       = "/"
+	defaultPolicy        = "2026-11-01"
+	defaultRoot          = "/var/log"
+	defaultTTL           = 15 * time.Minute
+	defaultProbe         = 10 * time.Second
+	defaultInvestigation = 5 * time.Minute
+	defaultMaxOutput     = 64 << 10
+	defaultPrlimit       = "/usr/bin/prlimit"
+	maxBodyLimit         = 8 << 20
+	maxByteLimit         = 1 << 40
+	maxCountLimit        = 1_000_000
+	defaultPlanner       = "stub"
+	defaultLLMTimeout    = 30 * time.Second
+	defaultLLMResponse   = 1 << 20
+	defaultLLMMaxProbes  = 6
+	defaultLLMMaxObs     = 4096
+	defaultLLMMaxTokens  = 1024
+)
+
+// Default resource limits. They are deliberately generous enough for ordinary
+// observation commands and small files, and finite enough that a runaway script
+// cannot take the host with it. A zero value disables one limit; all zeroes
+// disable prlimit entirely.
+const (
+	defaultLimitCPU    = 10 * time.Second
+	defaultLimitAS     = 512 << 20
+	defaultLimitNProc  = 256
+	defaultLimitFSize  = 16 << 20
+	defaultLimitNoFile = 256
 )
 
 // Config is the validated service configuration.
@@ -58,6 +101,9 @@ type Config struct {
 	LogLevel slog.Level
 	// MaxRequestBytes bounds the size of an accepted JSON request body.
 	MaxRequestBytes int64
+	// APIToken is the bearer token required for /api when non-empty. Without
+	// one, the listener must be loopback-only.
+	APIToken string
 
 	// Bash is the absolute path of the shell used for probes and actions.
 	Bash string
@@ -86,22 +132,72 @@ type Config struct {
 	// they may share state. Off by default: independent probes are the clearer
 	// evidence.
 	PersistentProbes bool
+	// InvestigationTimeout bounds one task's investigation across probes and
+	// model calls.
+	InvestigationTimeout time.Duration
+	// ExecutorUser is the Linux identity that probes, actions and verification
+	// run as. Empty keeps the service identity; otherwise every shell must
+	// actually assume this identity or startup fails.
+	ExecutorUser string
+	// Limits bounds every shell process. It is applied with prlimit.
+	Limits shell.Limits
+	// Prlimit is the path of util-linux prlimit. It is ignored when Limits is
+	// zero.
+	Prlimit string
+	// Planner selects "stub" (deterministic probes) or "model" (an
+	// OpenAI-compatible provider).
+	Planner string
+	// LLMBaseURL, LLMAPIKey and LLMModel configure the provider. The key is
+	// never logged or written to the database.
+	LLMBaseURL string
+	LLMAPIKey  string
+	LLMModel   string
+	// LLMTimeout bounds one provider request.
+	LLMTimeout time.Duration
+	// LLMMaxResponseBytes bounds the provider's response body.
+	LLMMaxResponseBytes int64
+	// LLMMaxProbes bounds the first model phase.
+	LLMMaxProbes int
+	// LLMMaxObservationBytes bounds one observation in the conclusion prompt.
+	LLMMaxObservationBytes int
+	// LLMMaxTokens bounds the provider's completion.
+	LLMMaxTokens int
 }
 
 // Load reads the environment, validates it, and returns the configuration.
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:            getenv(envAddr, defaultAddr),
-		DBPath:          getenv(envDBPath, filepath.Join("data", "gradops.db")),
-		MaxRequestBytes: 1 << 20,
-		Bash:            getenv(envBash, defaultBash),
-		WorkDir:         getenv(envWorkDir, defaultWorkDir),
-		ContractWorkDir: getenv(envContractWorkDir, "/"),
-		PolicyVersion:   getenv(envPolicyVersion, defaultPolicy),
-		ApprovalTTL:     defaultTTL,
-		ProbeTimeout:    defaultProbe,
-		MaxOutputBytes:  defaultMaxOutput,
-		EnableWorker:    true,
+		Addr:                 getenv(envAddr, defaultAddr),
+		DBPath:               getenv(envDBPath, filepath.Join("data", "gradops.db")),
+		MaxRequestBytes:      1 << 20,
+		APIToken:             strings.TrimSpace(os.Getenv(envAPIToken)),
+		Bash:                 getenv(envBash, defaultBash),
+		WorkDir:              getenv(envWorkDir, defaultWorkDir),
+		ContractWorkDir:      getenv(envContractWorkDir, "/"),
+		PolicyVersion:        getenv(envPolicyVersion, defaultPolicy),
+		ApprovalTTL:          defaultTTL,
+		ProbeTimeout:         defaultProbe,
+		InvestigationTimeout: defaultInvestigation,
+		MaxOutputBytes:       defaultMaxOutput,
+		EnableWorker:         true,
+		ExecutorUser:         getenv(envExecutorUser, ""),
+		Prlimit:              getenv(envPrlimit, defaultPrlimit),
+		Limits: shell.Limits{
+			CPU:               defaultLimitCPU,
+			AddressSpaceBytes: defaultLimitAS,
+			MaxProcesses:      defaultLimitNProc,
+			MaxFileSizeBytes:  defaultLimitFSize,
+			MaxOpenFiles:      defaultLimitNoFile,
+		},
+		Planner:                getenv(envPlanner, defaultPlanner),
+		LLMBaseURL:             getenv(envLLMBaseURL, ""),
+		LLMAPIKey:              strings.TrimSpace(os.Getenv(envLLMAPIKey)),
+		LLMModel:               getenv(envLLMModel, ""),
+		LLMTimeout:             defaultLLMTimeout,
+		LLMMaxResponseBytes:    defaultLLMResponse,
+		LLMMaxProbes:           defaultLLMMaxProbes,
+		LLMMaxObservationBytes: defaultLLMMaxObs,
+		LLMMaxTokens:           defaultLLMMaxTokens,
 	}
 
 	level, err := parseLevel(getenv(envLogLevel, defaultLog))
@@ -112,6 +208,12 @@ func Load() (Config, error) {
 
 	if _, _, err := net.SplitHostPort(cfg.Addr); err != nil {
 		return Config{}, fmt.Errorf("%s must be a host:port address: %w", envAddr, err)
+	}
+	if cfg.APIToken != "" && len(cfg.APIToken) < 16 {
+		return Config{}, fmt.Errorf("%s must be at least 16 characters", envAPIToken)
+	}
+	if cfg.APIToken == "" && !loopbackAddr(cfg.Addr) {
+		return Config{}, fmt.Errorf("%s must bind to a loopback address unless %s is set", envAddr, envAPIToken)
 	}
 	if strings.TrimSpace(cfg.DBPath) == "" {
 		return Config{}, fmt.Errorf("%s must not be empty", envDBPath)
@@ -175,12 +277,109 @@ func Load() (Config, error) {
 		cfg.ProbeTimeout = timeout
 	}
 
+	if raw := strings.TrimSpace(os.Getenv(envInvestigation)); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 || timeout > 30*time.Minute {
+			return Config{}, fmt.Errorf("%s must be a duration between 1ns and 30m", envInvestigation)
+		}
+		cfg.InvestigationTimeout = timeout
+	}
+
 	if raw := strings.TrimSpace(os.Getenv(envMaxOutput)); raw != "" {
 		var n int
 		if _, err := fmt.Sscanf(raw, "%d", &n); err != nil || n <= 0 || n > maxBodyLimit {
 			return Config{}, fmt.Errorf("%s must be an integer between 1 and %d", envMaxOutput, maxBodyLimit)
 		}
 		cfg.MaxOutputBytes = n
+	}
+
+	if raw := strings.TrimSpace(os.Getenv(envLimitCPU)); raw != "" {
+		if raw == "0" {
+			cfg.Limits.CPU = 0
+		} else {
+			value, err := time.ParseDuration(raw)
+			if err != nil || value <= 0 || value > 24*time.Hour {
+				return Config{}, fmt.Errorf("%s must be 0 or a duration between 1ns and 24h", envLimitCPU)
+			}
+			cfg.Limits.CPU = value
+		}
+	}
+
+	addressSpace, err := parseBound(envLimitAS, cfg.Limits.AddressSpaceBytes, maxByteLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Limits.AddressSpaceBytes = addressSpace
+
+	maxProcesses, err := parseBound(envLimitNProc, cfg.Limits.MaxProcesses, maxCountLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Limits.MaxProcesses = maxProcesses
+
+	maxFileSize, err := parseBound(envLimitFSize, cfg.Limits.MaxFileSizeBytes, maxByteLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Limits.MaxFileSizeBytes = maxFileSize
+
+	maxOpenFiles, err := parseBound(envLimitNoFile, cfg.Limits.MaxOpenFiles, maxCountLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Limits.MaxOpenFiles = maxOpenFiles
+
+	if cfg.ExecutorUser != "" {
+		if cfg.ExecutorUser == "0" || strings.EqualFold(cfg.ExecutorUser, "root") {
+			return Config{}, fmt.Errorf("%s must not be root", envExecutorUser)
+		}
+	}
+
+	cfg.Planner = strings.ToLower(strings.TrimSpace(cfg.Planner))
+	switch cfg.Planner {
+	case "stub", "model":
+	default:
+		return Config{}, fmt.Errorf("%s must be stub or model (got %q)", envPlanner, cfg.Planner)
+	}
+	if cfg.Planner == "model" {
+		if cfg.LLMBaseURL == "" {
+			return Config{}, fmt.Errorf("%s is required when %s=model", envLLMBaseURL, envPlanner)
+		}
+		if cfg.LLMModel == "" {
+			return Config{}, fmt.Errorf("%s is required when %s=model", envLLMModel, envPlanner)
+		}
+	}
+
+	if raw := strings.TrimSpace(os.Getenv(envLLMTimeout)); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 || timeout > 5*time.Minute {
+			return Config{}, fmt.Errorf("%s must be a duration between 1ns and 5m", envLLMTimeout)
+		}
+		cfg.LLMTimeout = timeout
+	}
+	responseBytes, err := parseBound(envLLMResponse, cfg.LLMMaxResponseBytes, 8<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.LLMMaxResponseBytes = responseBytes
+	maxProbes, err := parseBound(envLLMMaxProbes, int64(cfg.LLMMaxProbes), 12)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.LLMMaxProbes = int(maxProbes)
+	maxObservation, err := parseBound(envLLMMaxObs, int64(cfg.LLMMaxObservationBytes), 64<<10)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.LLMMaxObservationBytes = int(maxObservation)
+	maxTokens, err := parseBound(envLLMMaxTokens, int64(cfg.LLMMaxTokens), 8192)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.LLMMaxTokens = int(maxTokens)
+	if cfg.LLMMaxResponseBytes <= 0 || cfg.LLMMaxProbes <= 0 ||
+		cfg.LLMMaxObservationBytes <= 0 || cfg.LLMMaxTokens <= 0 {
+		return Config{}, fmt.Errorf("LLM limits must be positive")
 	}
 
 	if raw := strings.TrimSpace(os.Getenv(envRequireRunAs)); raw != "" {
@@ -213,6 +412,21 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// loopbackAddr reports whether a host:port address is provably local. A
+// hostname that is not localhost is not resolved: DNS could make the check
+// depend on the resolver, so it is treated as non-loopback.
+func loopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func getenv(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
@@ -243,4 +457,18 @@ func parseBool(name, raw string) (bool, error) {
 	default:
 		return false, fmt.Errorf("%s must be a boolean (got %q)", name, raw)
 	}
+}
+
+// parseBound reads a non-negative integer. Zero means "no limit", which is
+// distinct from the fallback used when the variable is unset.
+func parseBound(name string, fallback, maximum int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 || value > maximum {
+		return 0, fmt.Errorf("%s must be an integer between 0 and %d", name, maximum)
+	}
+	return value, nil
 }

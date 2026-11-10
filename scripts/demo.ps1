@@ -52,6 +52,10 @@ $env:GRADOPS_BASH = if ($env:GRADOPS_BASH) { $env:GRADOPS_BASH } else { 'C:\Prog
 $server = Start-Process -FilePath $bin -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $err
 
 $base = "http://$Addr"
+$headers = @{}
+if ($env:GRADOPS_API_TOKEN) {
+  $headers['Authorization'] = "Bearer $env:GRADOPS_API_TOKEN"
+}
 $healthy = $false
 for ($i = 0; $i -lt 100; $i++) {
   if ($server.HasExited) { throw ("server exited: " + ((Get-Content $log -Raw -ErrorAction SilentlyContinue) + (Get-Content $err -Raw -ErrorAction SilentlyContinue))) }
@@ -63,14 +67,14 @@ for ($i = 0; $i -lt 100; $i++) {
 if (-not $healthy) { throw 'server did not become healthy' }
 
 Write-Host '==> creating a task'
-$task = Invoke-RestMethod "$base/api/tasks" -Method Post -ContentType 'application/json' `
+$task = Invoke-RestMethod "$base/api/tasks" -Method Post -ContentType 'application/json' -Headers $headers `
   -Body (@{ request_text = 'check the disk and report usage' } | ConvertTo-Json)
 Write-Host "    task $($task.id)"
 
 Write-Host '==> waiting for the worker'
 $status = ''
 for ($i = 0; $i -lt 100; $i++) {
-  $detail = Invoke-RestMethod "$base/api/tasks/$($task.id)"
+  $detail = Invoke-RestMethod "$base/api/tasks/$($task.id)" -Headers $headers
   $status = $detail.status
   if ($status -in @('SEALED', 'FAILED', 'REJECTED')) { break }
   Start-Sleep -Milliseconds 200
@@ -78,13 +82,13 @@ for ($i = 0; $i -lt 100; $i++) {
 Write-Host "    status: $status"
 
 Write-Host '==> detail'
-Invoke-RestMethod "$base/api/tasks/$($task.id)" | ConvertTo-Json -Depth 4
+Invoke-RestMethod "$base/api/tasks/$($task.id)" -Headers $headers | ConvertTo-Json -Depth 4
 Write-Host '==> evidence'
-Invoke-RestMethod "$base/api/tasks/$($task.id)/evidence" | ConvertTo-Json -Depth 4
+Invoke-RestMethod "$base/api/tasks/$($task.id)/evidence" -Headers $headers | ConvertTo-Json -Depth 4
 Write-Host '==> timeline'
-Invoke-RestMethod "$base/api/tasks/$($task.id)/timeline" | ConvertTo-Json -Depth 4
+Invoke-RestMethod "$base/api/tasks/$($task.id)/timeline" -Headers $headers | ConvertTo-Json -Depth 4
 Write-Host '==> audit chain'
-$audit = Invoke-RestMethod "$base/api/audit/verify"
+$audit = Invoke-RestMethod "$base/api/audit/verify" -Headers $headers
 $audit | ConvertTo-Json
 
 if ($status -ne 'SEALED') { throw "expected the task to be sealed, got $status" }

@@ -28,6 +28,19 @@ type RuntimeInfo struct {
 	// PersistentProbes reports whether an investigation's probes share one
 	// shell.
 	PersistentProbes bool `json:"persistent_probes"`
+	// ExecutorUser is the identity every shell is required to assume. Empty
+	// means the service identity.
+	ExecutorUser string `json:"executor_user"`
+	// Resource limits applied to each shell process. Zero means unlimited.
+	CPULimitMS        int64 `json:"cpu_limit_ms"`
+	AddressSpaceBytes int64 `json:"address_space_bytes"`
+	ProcessLimit      int64 `json:"process_limit"`
+	FileSizeBytes     int64 `json:"file_size_bytes"`
+	OpenFileLimit     int64 `json:"open_file_limit"`
+	// Planner names the investigation planner: stub or model.
+	Planner string `json:"planner"`
+	// APITokenSet reports whether /api requires a bearer token.
+	APITokenSet bool `json:"api_token_set"`
 }
 
 type approvalItemDTO struct {
@@ -330,6 +343,10 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 	guards := []guardDTO{
 		{Key: "policy", Name: "确定性策略", Status: "ok",
 			Detail: fmt.Sprintf("策略版本 %s，判定不读取模型自报风险", info.PolicyVersion)},
+		{Key: "planner", Name: "调查计划器", Status: "ok",
+			Detail: plannerDetail(info.Planner)},
+		{Key: "api_auth", Name: "API 认证", Status: apiAuthStatus(info),
+			Detail: apiAuthDetail(info)},
 		{Key: "contract", Name: "动作契约", Status: "ok",
 			Detail: "执行前重算规范化摘要，不一致即拒绝"},
 		{Key: "approval", Name: "一次性审批", Status: "ok",
@@ -337,10 +354,10 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 				(time.Duration(info.ApprovalTTLMS) * time.Millisecond).String())},
 		{Key: "paths", Name: "路径边界", Status: "ok",
 			Detail: "动作声明的路径必须落在允许根目录内：" + strings.Join(info.AllowedRoots, ", ")},
-		{Key: "identity", Name: "运行身份", Status: identityStatus(info.RequireRunAsMatch),
-			Detail: identityDetail(info.RequireRunAsMatch)},
+		{Key: "identity", Name: "运行身份", Status: identityStatus(info),
+			Detail: identityDetail(info)},
 		{Key: "isolation", Name: "运行时隔离", Status: "warn",
-			Detail: "未实现：无 uid 切换、namespace、cgroup 或 systemd 单元；目前只有进程组、超时与输出上限"},
+			Detail: isolationDetail(info)},
 		{Key: "audit", Name: "审计链", Status: "ok",
 			Detail: "SHA-256 链，事件与状态变更在同一事务写入"},
 		{Key: "worker", Name: "持久 Worker", Status: "ok",
@@ -358,7 +375,7 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	summary := "策略、契约、审批与审计已生效；运行时隔离尚未实现，主机权限边界低于目标设计"
+	summary := "策略、契约、审批、审计与资源限制已生效；无 namespace、cgroup 或文件系统隔离，主机权限边界仍低于目标设计"
 	if overall == "ok" {
 		summary = "全部检查项正常"
 	}
@@ -390,16 +407,65 @@ func rawJSON(value string) []byte {
 // identityStatus is "ok" only when the executor refuses contracts whose run_as
 // this process cannot assume. Without a runtime that can switch user, an
 // unenforced contract identity would be a claim rather than a boundary.
-func identityStatus(enforced bool) string {
-	if enforced {
+func apiAuthStatus(info RuntimeInfo) string {
+	if info.APITokenSet {
 		return "ok"
 	}
 	return "warn"
 }
 
-func identityDetail(enforced bool) string {
-	if enforced {
+func apiAuthDetail(info RuntimeInfo) string {
+	if info.APITokenSet {
+		return "所有 /api 路由要求 Bearer token；健康检查保持开放"
+	}
+	return "未设置 GRADOPS_API_TOKEN：仅允许回环地址监听，API 对同机进程无认证"
+}
+
+func plannerDetail(planner string) string {
+	if planner == "model" {
+		return "模型只提出探针和动作；探针先过只读校验，动作再过策略、契约和必要的人工审批"
+	}
+	return "确定性替身：固定只读探针，不解释任务请求，也不会提出动作"
+}
+
+func identityStatus(info RuntimeInfo) string {
+	if info.ExecutorUser != "" || info.RequireRunAsMatch {
+		return "ok"
+	}
+	return "warn"
+}
+
+func identityDetail(info RuntimeInfo) string {
+	if info.ExecutorUser != "" {
+		return fmt.Sprintf("执行、验证与探针以 %s 身份运行；契约的 run_as 必须与之一致", info.ExecutorUser)
+	}
+	if info.RequireRunAsMatch {
 		return "已开启强制校验：契约的 run_as 必须等于当前进程身份，否则拒绝执行"
 	}
-	return "契约要求声明非 root 的 run_as，但服务不会切换身份：脚本以服务进程身份运行（可用 GRADOPS_REQUIRE_RUN_AS_MATCH 开启拒绝）"
+	return "未配置 GRADOPS_EXECUTOR_USER：脚本以服务进程身份运行，契约声明的身份不会被实际切换"
+}
+
+func isolationDetail(info RuntimeInfo) string {
+	limits := []string{}
+	if info.CPULimitMS > 0 {
+		limits = append(limits, fmt.Sprintf("CPU %s", (time.Duration(info.CPULimitMS)*time.Millisecond).String()))
+	}
+	if info.AddressSpaceBytes > 0 {
+		limits = append(limits, fmt.Sprintf("内存 %d MiB", info.AddressSpaceBytes>>20))
+	}
+	if info.ProcessLimit > 0 {
+		limits = append(limits, fmt.Sprintf("进程 %d", info.ProcessLimit))
+	}
+	if info.FileSizeBytes > 0 {
+		limits = append(limits, fmt.Sprintf("文件 %d MiB", info.FileSizeBytes>>20))
+	}
+	if info.OpenFileLimit > 0 {
+		limits = append(limits, fmt.Sprintf("fd %d", info.OpenFileLimit))
+	}
+
+	detail := "未实现：无 namespace、cgroup 或 systemd 单元，也没有文件系统与网络隔离"
+	if len(limits) > 0 {
+		detail += "；已通过 prlimit 限制：" + strings.Join(limits, "、")
+	}
+	return detail
 }

@@ -36,6 +36,8 @@ API 不直接执行系统操作。LLM 只参与有限调查和提出结构化建
 
 LLM 是规划与理解模块，不是控制中心：它可以根据任务动态生成结构化 Linux 命令提案，并依据真实执行结果决定下一步；它不持有执行权限，也不能授权动作、决定风险等级或直接执行命令。命令解析、规范化、Policy、Approval 与 Executor 均由确定性代码负责。模型 Provider 可替换，不能改变核心安全执行链。
 
+当前 `investigation.ModelPlanner` 采用两阶段：第一阶段只选探针；探针经只读分析和受限 Shell 执行后，第二阶段才让模型看到截断后的观测并给出结论/动作。动作仍要经过策略、契约、审批和执行器；模型返回的 JSON 有字段、数量、字节上限和引用范围校验。
+
 Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现本地 Linux 工具；MCP/Kubernetes 作为后续 Adapter，不进入首期运行依赖。详见 [Tool 层安全与 Adapter 扩展设计](design/tool-layer-and-adapters.md)。
 
 ## 3. Go 包职责与依赖规则
@@ -66,19 +68,21 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 | `internal/store` | SQLite 连接、嵌入式版本化迁移、`Tx` 事务封装 |
 | `internal/audit` | 追加式 SHA-256 链与链校验 |
 | `internal/worker` | 认领、租约、重试、启动恢复与执行循环 |
-| `internal/shell` | 受控 Bash：超时、输出截断、调用预算、进程组回收、环境白名单。`Session` 每次调用一个新进程，`Console` 常驻一个进程并在调用之间保留状态；执行器用前者 |
+| `internal/shell` | 受控 Bash：超时、输出截断、调用预算、进程组回收、环境白名单、prlimit 资源限制、可选 uid/gid 切换。`Session` 每次调用一个新进程，`Console` 常驻一个进程并在调用之间保留状态；执行器用前者 |
 | `internal/policy` | 确定性 R0–R4 判定与审批要求，不导入 LLM |
+| `internal/command` | 基于 `mvdan.cc/sh/v3` 的辅助分析：识别写操作、间接执行与动态命令名；不承担授权或沙箱职责 |
 | `internal/contract` | 规范化 JSON、脚本摘要与契约摘要 |
 | `internal/approval` | 一次性审批凭证：只存哈希、绑定契约、原子消费 |
 | `internal/executor` | 唯一副作用入口；执行前重算摘要并复核策略；契约内补偿回滚 |
 | `internal/verify` | 执行后的独立只读观测 |
-| `internal/investigation` | 探针 → 证据 → grounding，结论引用真实 evidence ID |
+| `internal/investigation` | 探针 → 证据 → grounding；支持单阶段计划器和“探针 → 观测 → 结论/动作”的两阶段模型计划器 |
+| `internal/llm` | OpenAI 兼容聊天客户端：超时、响应大小上限、回环 HTTP 限制、Bearer 认证；不记录密钥 |
 | `internal/evidence` | 内容寻址的证据存储与引用校验 |
 | `internal/task` | Task History 的创建、查询与时间线 |
 | `internal/api` | REST 接口与错误映射 |
 | `internal/e2e` | 贯穿真实组件的闭环测试 |
 
-尚未实现：规格中的 `llm`（模型客户端）、`command`（Shell AST 分析器）与 `linux`（systemd/cgroup/uid 隔离原语）包。因此模型目前是 `investigation.StubPlanner`，隔离边界目前只有进程组与超时。详见 [README 的当前实现状态](../README.md#当前实现状态)。
+尚未实现：规格中的 `linux`（systemd/cgroup 隔离原语）包。`internal/llm` 已提供 OpenAI 兼容客户端，`investigation.ModelPlanner` 提供两阶段模型计划；默认部署仍是 `StubPlanner`，`GRADOPS_PLANNER=model` 才启用模型。执行边界目前包括进程组、超时、输出上限、环境白名单、prlimit 资源限制，以及在配置 `GRADOPS_EXECUTOR_USER` 后的 uid/gid 切换；namespace、cgroup、文件系统与网络隔离仍未实现。`command` 已作为辅助分析包存在，但只校验探针/observe/验证命令的只读性，不是授权引擎。详见 [README 的当前实现状态](../README.md#当前实现状态)。
 
 ## 4. Linux Shell 与执行模型
 
@@ -98,9 +102,9 @@ Policy 不试图证明任意 Shell 文本在语义上绝对安全，也不把所
 
 ### 4.3 AST 的定位
 
-可使用 `mvdan.cc/sh` 等 Parser 对 Shell 脚本做 AST 分析，用于展示命令结构、识别 `eval`、`bash -c`、`source`、`xargs`、`find -exec`、`awk system()` 等间接执行入口、提取潜在写入目标，并为审批和审计提供结构化信息。
+当前 `internal/command` 使用 `mvdan.cc/sh/v3` 对 Shell 脚本做 AST 分析，识别写操作、`eval`、`bash -c`、`source`、`xargs`、`find -exec`、`awk system()` 等间接执行入口和动态命令名。探针、`observe` 动作和验证命令在运行前使用该分析做 fail-closed 校验；更完整的命令结构展示与审批信息尚未实现。
 
-AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部脚本、环境变量、命令替换和运行时状态使得静态分析无法完整证明任意脚本安全。分析器无法理解的节点应提高风险、要求人工确认或拒绝自动执行，而不能因为“解析成功”就放行。
+AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部脚本、环境变量、命令替换和运行时状态使得静态分析无法完整证明任意脚本安全。当前分析器只识别已知命令和已知间接执行形式，未知命令仍可能写文件；因此它只用于只读性校验，真正的边界仍是 Policy、Approval 和 Runtime。
 
 ### 4.4 Linux Runtime 是最终执行边界
 
@@ -135,7 +139,7 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 
 安全控制按层叠加：
 
-1. API 身份认证与输入校验；
+1. API 身份认证与输入校验（Bearer token；未设置 token 时只允许回环监听）；
 2. Shell Session 的受控环境、会话权限和调用预算；
 3. Grounding 证据绑定；
 4. 确定性 Policy 风险与权限判定；
@@ -151,7 +155,7 @@ AST 分析可辅助风险提示、审批展示和审计，但不替代 Policy、
 
 ## 7. 前端与 API
 
-现有 Vue 3 前端继续使用 REST/JSON。API DTO 与领域模型分离，避免将数据库结构直接暴露给前端。主要资源包括：
+现有 Vue 3 前端继续使用 REST/JSON。API DTO 与领域模型分离，避免将数据库结构直接暴露给前端。设置 `GRADOPS_API_TOKEN` 时，除健康检查外的所有 `/api` 路由要求 Bearer token；前端可以从浏览器 `localStorage` 的 `gradops_api_token` 读取同一 token。主要资源包括：
 
 - `/api/tasks`：创建、查询任务；
 - `/api/tasks/{id}/timeline`：审计时间线；

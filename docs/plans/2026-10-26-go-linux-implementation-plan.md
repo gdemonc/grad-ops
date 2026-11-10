@@ -6,7 +6,7 @@
 ## Phase 0：规格冻结
 
 - [x] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
-- [ ] 确定首期 Ubuntu LTS 版本与支持的 Go 版本（Go 1.26.1 已在 `go.mod` 固定；Ubuntu 版本待 Linux CI 落地后确认）。
+- [x] 确定首期 Ubuntu LTS 版本与支持的 Go 版本（Ubuntu 26.04.1 LTS 上以 Go 1.27.3 验证；`go.mod` 仍要求 Go 1.26.0 作为语言下限，CI 固化待补）。
 - [x] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell Session、Policy/Approval、Action Contract 与 Linux Runtime 边界。
 - [x] 评审任务生命周期与故障恢复设计：`docs/design/task-lifecycle-and-recovery.md`。
 - [x] 评审 Tool 层安全与 Adapter 抽象：`docs/design/tool-layer-and-adapters.md`。
@@ -21,13 +21,14 @@
 
 - [x] 创建 `go.mod` 与 `cmd/gradops/main.go`。
 - [x] 配置、日志、HTTP server、优雅关闭、健康检查。
+- [x] API Bearer 认证：设置 `GRADOPS_API_TOKEN` 时所有 `/api` 路由要求 token；未设置时只允许回环监听。还没有用户/角色授权。
 - [x] SQLite 迁移与事务封装（查询位于各服务包内，未引入独立 Repository 层）。
 - [x] 建立 task、job、evidence、proposal、approval、execution、verification、audit 的数据库表。
 - [x] 建立上述实体的 Go 领域模型（分布于各服务包：`contract.Contract`、`evidence.Record`、`approval.Grant`、`executor.Outcome`、`verify.Result`，未集中在单一 domain 包）。
 - [x] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
 - [x] 状态机函数与状态迁移单测。
 - [x] Worker 任务认领、租约、超时和恢复策略；按任务生命周期设计处理 UNKNOWN，禁止不确定副作用自动重放。
-- [ ] Linux CI 执行 `go test ./...`、`go vet ./...`（当前仅在 Windows 开发机验证，未见 Linux CI 结果）。
+- [ ] Linux CI 执行 `go test ./...`、`go vet ./...`（Ubuntu 26.04.1 本机已通过，含 `-race`；尚未接入 CI）。
 
 **验收：** 空项目可在 Ubuntu 启动；创建任务、持久化、重启恢复与审计写入均有集成测试；任务时间线可回看关键步骤及其来源。
 
@@ -35,16 +36,18 @@
 
 - [x] 实现通用持久 Bash Session：固定 Bash、会话生命周期、工作目录、受控环境、超时、输出截断和调用预算。（`shell.Console` 常驻一个 Bash 进程，包装脚本用哨兵行分帧、输出经临时文件捕获，超时按进程组终止并把会话标记为死亡；`shell.Session` 仍是每次调用一个新进程。执行契约默认走 Session：审批过的动作不应依赖前一个无关脚本留下的环境变量或目录。）
 - [x] 实现 Policy/Approval：按主体身份、目标资源、副作用、风险和部署策略判定授权；不穷举预定义业务命令。
-- [ ] 可选引入 Shell AST Parser（建议评估 `mvdan.cc/sh`）作为辅助分析器，用于结构展示、风险提示和审计；不得把 AST 解析/白名单作为唯一安全边界。
+- [x] 引入 Shell AST Parser（`mvdan.cc/sh/v3`）作为辅助分析器：识别写操作、间接执行（`eval`/`bash -c`/`source`/`xargs`/`find -exec`/`awk system()` 等）和动态命令名；探针、`observe` 动作和验证命令在运行前 fail-closed 校验。未把它当作唯一安全边界，也未实现完整 AST 展示。
 - [x] 实现 Action Contract，绑定原始脚本摘要、目标资源、主体/运行身份、隔离配置和预算；AST 摘要仅作为辅助审计字段（未包含 Shell/Runtime 版本字段）。
 - [ ] 实现 Linux Runtime：专用非 root 身份、systemd transient unit/scope 或等效 cgroup、CPU/内存/PID/时间/输出限制、进程组回收。
+  - 已实现：可选的 uid/gid 切换（`GRADOPS_EXECUTOR_USER`，非 root 无法切换时启动失败）、prlimit 资源限制（CPU/地址空间/进程数/文件大小/文件描述符）、进程组回收。
+  - 未实现：namespace、cgroup、systemd 单元、文件系统与网络隔离。
 - [x] 调查和操作分离：调查阶段开放必要只读视图；写文件、服务管理、包管理和权限变更进入 Host Operation 授权流程。
 - [ ] 高权限操作经独立、窄接口、可审计的 privileged broker/helper；不把 Agent 加入 sudo 组，不向 Bash Session 暴露任意 sudo。
 - [ ] 评估文件系统与网络隔离的首期可行配置；Landlock、Bubblewrap、AppArmor/seccomp 按需增强，不要求首期全部引入。
-- [ ] 测试超时、输出上限、环境清理、CPU/内存/PID/文件大小预算、进程组终止和调用轮次。（部分：超时、输出上限、环境清理、调用预算、进程组终止已有测试；CPU/内存/PID 预算随 Runtime 未实现）
+- [x] 测试超时、输出上限、环境清理、CPU/内存/PID/文件大小预算、进程组终止和调用轮次。（超时、输出上限、环境清理、调用预算、进程组终止已有测试；CPU/地址空间/进程数/文件大小/fd 由 prlimit 测试覆盖；cgroup 级预算仍未实现）
 - [ ] 实现统一 Command/Tool Adapter 接口；不实现 MCP Client。
-- [ ] OpenAI 兼容 LLM client，支持 mock provider。
-- [ ] 调查轮次、工具调用次数、总耗时和输出 token 预算。
+- [x] OpenAI 兼容 LLM client，支持测试替身（`llm.CompleterFunc`）；提供两阶段模型计划器，默认部署仍为 `StubPlanner`。真实 provider 尚未用密钥验证。
+- [ ] 调查轮次、工具调用次数、总耗时和输出 token 预算。（部分：已限制探针数、单次 provider 超时、补全 token、shell 调用次数，并有 `GRADOPS_INVESTIGATION_TIMEOUT` 调查总时限；执行、审批等待和人工复核没有任务级总时限）
 - [x] Grounding 只接受真实 evidence ID。
 - [ ] 对提示注入、未知工具、畸形 JSON 和预算耗尽编写对抗测试。（部分：畸形 JSON、未知动作类型、预算耗尽已有测试；提示注入未覆盖）
 
@@ -111,7 +114,7 @@ Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.m
 
 ## 完成定义
 
-- [ ] Go 代码可构建，测试在 Linux CI 通过（本地构建与测试通过；Linux CI 尚无结果）。
+- [ ] Go 代码可构建，测试在 Linux CI 通过（Ubuntu 26.04.1 本机构建、测试与 `-race` 通过；Linux CI 尚无结果）。
 - [ ] 无 Windows 适配代码或 Windows 专属启动步骤（`internal/shell/control_other.go` 是开发机存根，需在 Linux CI 落地后删除）。
 - [x] 所有副作用通过唯一 Executor 和确定性策略。
 - [x] 关键安全属性均有自动化测试，不只依赖文档承诺。

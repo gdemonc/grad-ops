@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 接入与 Linux Runtime 隔离（uid/namespace/cgroup）尚未实现。详见[当前实现状态](#当前实现状态)。
+> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 客户端与两阶段计划器已实现（默认仍用 stub），Linux Runtime 的 namespace/cgroup/systemd 隔离尚未实现，uid 切换与 prlimit 资源限制已实现。详见[当前实现状态](#当前实现状态)。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -41,8 +41,8 @@ Grad-Ops 是具备通用 Shell 能力、但不把主机权限交给模型的 Lin
 
 - Go 后端，REST/JSON API 与持久化 Worker。
 - SQLite，使用显式迁移、事务和任务租约。
-- 动态 Linux Shell 执行层：以持久 Bash Session 提供通用 Shell 能力；Policy/Approval 控制主机操作权限，受限 Runtime 提供 OS 级隔离、资源预算和进程回收；AST 作为辅助分析手段。
-- OpenAI 兼容 LLM API，并提供 mock 模式用于离线测试。
+- 动态 Linux Shell 执行层：以持久 Bash Session 提供通用 Shell 能力；Policy/Approval 控制主机操作权限，受限 Runtime 提供 OS 级隔离、资源预算和进程回收；AST（`mvdan.cc/sh/v3`）作为辅助分析手段。
+- OpenAI 兼容 LLM 客户端；测试使用 `llm.CompleterFunc` 作为离线替身，不需要真实密钥。
 - 现有 Vue 3 + Vite + Arco Design 前端沿用，通过 REST API 接入 Go 后端。
 - Ubuntu LTS 作为首期开发和 CI 基线；其他发行版须经工具行为测试后再声明支持。
 
@@ -70,24 +70,29 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | SQLite 版本化迁移、`STRICT` 表、事务封装 | 已实现 |
 | 任务状态机（单一迁移入口）、追加式审计哈希链 | 已实现 |
 | 任务、时间线、证据、提案 API | 已实现 |
+| API 认证 | 已实现：可选 `GRADOPS_API_TOKEN` Bearer token；无 token 时只允许回环监听；尚无用户/角色授权 |
 | Worker 认领、租约、重试、启动恢复、执行循环 | 已实现 |
 | 通用 Bash Session：超时、输出截断、调用预算、进程组回收、环境隔离 | 已实现（`shell.Session` 每次调用独立进程；`shell.Console` 提供常驻会话与跨调用状态） |
+| Shell 脚本辅助分析（AST） | 已实现：基于 `mvdan.cc/sh/v3` 识别写操作、间接执行和动态命令名；探针、`observe` 动作和验证命令在运行前做 fail-closed 校验。它不是策略引擎或沙箱 |
 | 调查：探针 → 证据、结论必须引用证据、提议动作 | 已实现（计划器是确定性替身） |
 | 确定性 Policy（R0–R4） | 已实现 |
 | 动作契约：规范化 JSON + SHA-256 摘要 | 已实现 |
 | 一次性审批：只存哈希、绑定契约摘要、单条 SQL 原子消费 | 已实现 |
 | Executor：重算摘要、复核策略、原子占用、执行 | 已实现 |
+| Linux 资源限制：CPU、地址空间、进程数、文件大小、文件描述符 | 已实现：通过 `prlimit` 在 shell 启动前应用，默认开启，可逐项设为 `0` 关闭 |
+| 执行身份切换 | 部分实现：配置 `GRADOPS_EXECUTOR_USER` 后以该身份运行探针、动作和验证；非 root 无法切换时启动失败。未配置时仍以服务进程身份运行 |
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
-| LLM 接入 | **未实现**：`StubPlanner` 只跑固定只读探针，不解释请求 |
-| Linux 隔离（uid 切换、namespace、cgroup、systemd） | **未实现**：目前只有进程组、超时、输出上限和环境白名单 |
-| 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）通过，dev 代理与真实后端联调验证 |
+| LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
+| Linux 隔离（namespace、cgroup、systemd、文件系统、网络） | **未实现**：目前有进程组、超时、输出上限、环境白名单、资源限制和可选的 uid 切换 |
+| 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
 
 ### 已验证 / 未验证
 
-- **已验证（Windows + Git Bash）**：队列、租约与恢复、Shell 边界、证据引用、策略判定、契约摘要、审批的绑定与重放拒绝、执行、独立验证、补偿回滚、审计链，以及一条跑通全流程的端到端测试与一次真实二进制冒烟；前端 `npm run build` 通过，dev 代理联调跑通了"创建任务 → Worker 调查 → 封存 → 审计校验"。
-- **未验证**：全部 Linux 专属行为。本仓库的二进制面向 Linux，但当前开发机没有可用的 Linux 环境；`GOOS=linux` 只做了交叉编译与 `go vet`，不能替代运行时验证。
-- 因此 `Linux Runtime` 一栏标记为未实现，而不是"应该可以"。
+- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-09）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）。
+- **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、namespace、cgroup、systemd 单元、真实 `/var/log` 路径下的文件边界、文件系统/网络隔离。这些不能因为测试套件全绿而被视为已实现。
+- **未验证**：Linux CI。当前结果来自一台开发机上的本地运行，不是 CI 产物；`-race` 仍未启用。
+- 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用之前的 Windows 结果，本次未重跑。
 
 ### 一条任务会经历什么
 
@@ -115,9 +120,13 @@ POST /api/tasks
 
 ### 已知限制（不是待办清单的装饰）
 
-- **计划器是替身**：默认部署只做只读调查并直接封存任务，不会产生提案。审批与执行路径通过测试与显式调用验证，而不是默认就会发生。
-- **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`；但服务本身没有能力切换到该身份，脚本默认以服务进程身份运行。设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 后，身份不一致的契约会被直接拒绝并写入 `execution.rejected` 审计，而不是"照契约声明、按进程身份执行"。真正的身份隔离属于未实现的 Runtime。
-- **策略是模式匹配**：危险命令检测是正则，不是 AST；它用于拒绝明显危险的动作，真正的边界是 Runtime，而 Runtime 尚未实现。
+- **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
+- **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`。配置 `GRADOPS_EXECUTOR_USER` 后，服务会解析该账号并真正切换 uid/gid；非 root 进程无法切换到其他用户时启动失败。未配置时仍以服务进程身份运行，此时设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 会拒绝身份不一致的契约并写入 `execution.rejected`。uid 切换的成功路径尚未在 root 环境实测。
+- **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前只提供进程组、超时、输出上限、环境白名单、prlimit 资源限制和可选 uid 切换，没有 namespace/cgroup/文件系统/网络隔离。
+- **资源限制依赖 util-linux**：`prlimit` 缺失时服务会拒绝启动；限制值默认适合只读探针和小文件，不保证兼容所有运维命令。
+- **时限**：`GRADOPS_INVESTIGATION_TIMEOUT` 限制调查阶段（探针 + 模型调用），默认 5 分钟；审批等待、人工复核和执行阶段不在这条时限内。
+- **API 认证**：设置 `GRADOPS_API_TOKEN` 后所有 `/api` 路由要求 Bearer token；未设置时只允许 `127.0.0.1` / `localhost` / `::1` 监听，同机进程仍可无认证调用。当前没有用户、角色或按任务的细粒度授权。
+- **模型数据边界**：`GRADOPS_PLANNER=model` 会把任务文本和截断后的探针观测发送给配置的 provider；尚未实现提示内容的秘密扫描。API Key 不进入 shell 环境、日志或数据库，但 provider 本身必须被信任到相应程度。默认 `stub` 不发送任何外部数据。
 - **审计链**只防御朴素篡改，DB 拥有者仍可重写整条链；信任边界见[威胁模型](docs/threat-model.md)。
 
 ## 本地运行与测试
@@ -128,17 +137,13 @@ GRADOPS_DB_PATH=./data/gradops.db GRADOPS_ALLOWED_ROOTS=/var/log ./bin/gradops
 go test ./...
 ```
 
-Linux 上使用默认值即可；`GRADOPS_BASH` 默认 `/bin/bash`。当前开发机是 Windows，冒烟时用 Git Bash 并显式指定工作目录：
+Linux 上使用默认值即可；`GRADOPS_BASH` 默认 `/bin/bash`。资源限制默认通过 `/usr/bin/prlimit` 应用；该工具缺失时服务会拒绝启动，而不是静默取消限制。需要以另一个身份运行时，服务本身必须是 root：
 
-```powershell
-$env:GRADOPS_BASH='C:\Program Files\Git\bin\bash.exe'
-$env:GRADOPS_WORK_DIR=(Resolve-Path .\data).Path
-$env:GRADOPS_CONTRACT_WORK_DIR='/work'
-$env:GRADOPS_ALLOWED_ROOTS='/var/log'
-go test ./...
+```bash
+GRADOPS_EXECUTOR_USER=gradops-agent GRADOPS_ALLOWED_ROOTS=/var/log ./bin/gradops
 ```
 
-需要 shell 的测试在找不到可用 Bash 时会 `t.Skip`，而不是假装通过。
+如果服务不是 root，而 `GRADOPS_EXECUTOR_USER` 指向另一个用户，启动会失败并说明无法切换身份。需要 shell 或 prlimit 的测试在工具缺失时会 `t.Skip`，而不是假装通过。
 
 环境变量：
 
@@ -148,6 +153,7 @@ go test ./...
 | `GRADOPS_DB_PATH` | `./data/gradops.db` | SQLite 文件路径 |
 | `GRADOPS_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `GRADOPS_MAX_REQUEST_BYTES` | `1048576` | 请求体上限，最大 8 MiB |
+| `GRADOPS_API_TOKEN` | 空 | `/api` 的 Bearer token，至少 16 字符；为空时只允许回环监听 |
 | `GRADOPS_BASH` | `/bin/bash` | 绝对路径；启动时校验存在且可执行 |
 | `GRADOPS_WORK_DIR` | `/` | 探针与动作运行的宿主目录 |
 | `GRADOPS_CONTRACT_WORK_DIR` | `/` | 写入契约的 POSIX 路径；开发机上与 `WORK_DIR` 不同 |
@@ -155,10 +161,27 @@ go test ./...
 | `GRADOPS_POLICY_VERSION` | `2026-11-01` | 写入契约，便于追溯 |
 | `GRADOPS_APPROVAL_TTL` | `15m` | 审批 token 有效期，最长 24h |
 | `GRADOPS_PROBE_TIMEOUT` | `10s` | 单次探针/验证命令超时 |
+| `GRADOPS_INVESTIGATION_TIMEOUT` | `5m` | 单次调查的总时限（探针 + 模型调用），最长 30 分钟 |
 | `GRADOPS_MAX_OUTPUT_BYTES` | `65536` | 每个输出流上限 |
 | `GRADOPS_WORKER` | `true` | 是否在本进程运行作业循环 |
 | `GRADOPS_REQUIRE_RUN_AS_MATCH` | `false` | 开启后契约声明的 `run_as` 必须等于当前进程身份，否则拒绝执行 |
+| `GRADOPS_EXECUTOR_USER` | 空 | 探针、动作和验证实际运行的身份；为空表示使用服务进程身份。设置后契约的 `run_as` 必须与之一致 |
+| `GRADOPS_PRLIMIT` | `/usr/bin/prlimit` | util-linux prlimit 的绝对路径；仅在启用资源限制时使用 |
+| `GRADOPS_RLIMIT_CPU` | `10s` | 单个 shell 的 CPU 时间上限；`0` 表示不限制 |
+| `GRADOPS_RLIMIT_AS_BYTES` | `536870912` | 地址空间上限（512 MiB）；`0` 表示不限制 |
+| `GRADOPS_RLIMIT_NPROC` | `256` | 服务用户可创建的进程数上限；`0` 表示不限制 |
+| `GRADOPS_RLIMIT_FSIZE_BYTES` | `16777216` | 单个文件大小上限（16 MiB）；`0` 表示不限制 |
+| `GRADOPS_RLIMIT_NOFILE` | `256` | 打开文件描述符上限；`0` 表示不限制 |
 | `GRADOPS_PROBE_CONSOLE` | `false` | 开启后同一次调查的探针共享一个常驻 Bash 进程；默认每次探针独立进程 |
+| `GRADOPS_PLANNER` | `stub` | `stub`：固定只读探针；`model`：OpenAI 兼容模型规划 |
+| `GRADOPS_LLM_BASE_URL` | 空 | `model` 模式必填，例如 `https://api.example.com/v1`；仅回环地址允许明文 HTTP |
+| `GRADOPS_LLM_API_KEY` | 空 | Bearer token；不写日志、不落库 |
+| `GRADOPS_LLM_MODEL` | 空 | `model` 模式必填 |
+| `GRADOPS_LLM_TIMEOUT` | `30s` | 单次 provider 请求超时，最长 5 分钟 |
+| `GRADOPS_LLM_MAX_RESPONSE_BYTES` | `1048576` | provider 响应体上限 |
+| `GRADOPS_LLM_MAX_PROBES` | `6` | 单次调查最多探针数 |
+| `GRADOPS_LLM_MAX_OBSERVATION_BYTES` | `4096` | 结论提示中单条观测的上限 |
+| `GRADOPS_LLM_MAX_TOKENS` | `1024` | 单次补全 token 上限 |
 
 接口：
 
@@ -193,7 +216,7 @@ npm run build     # vue-tsc 类型检查 + vite 构建
 npm run dev       # 默认把 /api 代理到 127.0.0.1:8080
 ```
 
-后端不在默认端口时用 `GRADOPS_BACKEND=http://127.0.0.1:18080 npm run dev` 覆盖代理目标。
+后端不在默认端口时用 `GRADOPS_BACKEND=http://127.0.0.1:18080 npm run dev` 覆盖代理目标。若后端设置了 `GRADOPS_API_TOKEN`，在浏览器 `localStorage` 写入同名的 `gradops_api_token` 后刷新页面；token 不打包进前端产物。
 
 ### 端到端演示
 
@@ -202,6 +225,6 @@ bash scripts/demo.sh                 # 目标平台：构建 → 启动 → 建�
 pwsh scripts/demo.ps1 -Addr 127.0.0.1:18080   # 开发机：Git Bash 作为 shell
 ```
 
-两个脚本都会在任务没有到达 `SEALED` 或审计链校验失败时以非零码退出，所以它是一次冒烟测试，而不是"总会成功"的演示。开发机上要显式给出 `GRADOPS_BASH`（Git Bash 的绝对路径）与 `GRADOPS_WORK_DIR`。
+两个脚本都会在任务没有到达 `SEALED` 或审计链校验失败时以非零码退出，所以它是一次冒烟测试，而不是"总会成功"的演示。设置 `GRADOPS_API_TOKEN` 时，两个脚本会自动把同一个 token 作为 Bearer 头发给 API。开发机上要显式给出 `GRADOPS_BASH`（Git Bash 的绝对路径）与 `GRADOPS_WORK_DIR`。
 
 控制台里的"批准并执行"是两次调用：先取得一次性 token，再带着它调用执行接口，token 不落盘；刷新页面后 token 即丢失，需要等审批过期再重新批准，而不是偷偷保留一个可用凭证。

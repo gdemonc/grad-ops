@@ -161,6 +161,14 @@ export type SafetyRuntime = {
   worker_enabled: boolean
   require_run_as_match: boolean
   persistent_probes: boolean
+  executor_user: string
+  cpu_limit_ms: number
+  address_space_bytes: number
+  process_limit: number
+  file_size_bytes: number
+  open_file_limit: number
+  planner: string
+  api_token_set: boolean
 }
 
 export type SafetyGuard = {

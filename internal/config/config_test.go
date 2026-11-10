@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdemonc/grad-ops/internal/config"
 )
@@ -61,5 +62,155 @@ func TestRequireRunAsMatchRejectsJunk(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "GRADOPS_REQUIRE_RUN_AS_MATCH") {
 		t.Fatalf("error should name the variable, got %v", err)
+	}
+}
+
+func TestResourceLimitsHaveSafeDefaults(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Limits.IsZero() {
+		t.Fatal("resource limits must be on by default")
+	}
+	if cfg.Limits.CPU <= 0 || cfg.Limits.AddressSpaceBytes <= 0 ||
+		cfg.Limits.MaxProcesses <= 0 || cfg.Limits.MaxFileSizeBytes <= 0 ||
+		cfg.Limits.MaxOpenFiles <= 0 {
+		t.Fatalf("incomplete default limits: %+v", cfg.Limits)
+	}
+	if cfg.Prlimit == "" {
+		t.Fatal("a default prlimit path is required when limits are enabled")
+	}
+}
+
+func TestResourceLimitsCanBeDisabledIndividually(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{
+		"GRADOPS_RLIMIT_CPU":         "0",
+		"GRADOPS_RLIMIT_AS_BYTES":    "0",
+		"GRADOPS_RLIMIT_NPROC":       "0",
+		"GRADOPS_RLIMIT_FSIZE_BYTES": "0",
+		"GRADOPS_RLIMIT_NOFILE":      "0",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Limits.IsZero() {
+		t.Fatalf("expected all limits disabled, got %+v", cfg.Limits)
+	}
+}
+
+func TestResourceLimitsRejectNegativeValues(t *testing.T) {
+	_, err := loadWith(t, map[string]string{"GRADOPS_RLIMIT_AS_BYTES": "-1"})
+	if err == nil {
+		t.Fatal("expected an error for a negative limit")
+	}
+	if !strings.Contains(err.Error(), "GRADOPS_RLIMIT_AS_BYTES") {
+		t.Fatalf("error should name the variable, got %v", err)
+	}
+}
+
+func TestExecutorUserRejectsRoot(t *testing.T) {
+	for _, raw := range []string{"root", "ROOT", "0"} {
+		_, err := loadWith(t, map[string]string{"GRADOPS_EXECUTOR_USER": raw})
+		if err == nil {
+			t.Fatalf("%s: expected root to be rejected", raw)
+		}
+	}
+}
+
+func TestPlannerDefaultsToStub(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Planner != "stub" {
+		t.Fatalf("planner = %q, want stub", cfg.Planner)
+	}
+}
+
+func TestModelPlannerRequiresProviderSettings(t *testing.T) {
+	_, err := loadWith(t, map[string]string{"GRADOPS_PLANNER": "model"})
+	if err == nil {
+		t.Fatal("expected an error without a base URL and model")
+	}
+}
+
+func TestPlannerRejectsUnknownMode(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{"GRADOPS_PLANNER": "magic"}); err == nil {
+		t.Fatal("expected an error for an unknown planner")
+	}
+}
+
+func TestModelPlannerAcceptsProviderSettings(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{
+		"GRADOPS_PLANNER":        "model",
+		"GRADOPS_LLM_BASE_URL":   "https://example.com/v1",
+		"GRADOPS_LLM_MODEL":      "test-model",
+		"GRADOPS_LLM_MAX_PROBES": "3",
+		"GRADOPS_LLM_MAX_TOKENS": "256",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Planner != "model" || cfg.LLMMaxProbes != 3 || cfg.LLMMaxTokens != 256 {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
+func TestInvestigationTimeoutDefaultsAndParses(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.InvestigationTimeout != 5*time.Minute {
+		t.Fatalf("default investigation timeout = %s", cfg.InvestigationTimeout)
+	}
+
+	cfg, err = loadWith(t, map[string]string{"GRADOPS_INVESTIGATION_TIMEOUT": "90s"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.InvestigationTimeout != 90*time.Second {
+		t.Fatalf("investigation timeout = %s", cfg.InvestigationTimeout)
+	}
+
+	if _, err := loadWith(t, map[string]string{"GRADOPS_INVESTIGATION_TIMEOUT": "0"}); err == nil {
+		t.Fatal("expected zero to be rejected")
+	}
+}
+
+func TestNonLoopbackRequiresAnAPIToken(t *testing.T) {
+	_, err := loadWith(t, map[string]string{"GRADOPS_ADDR": "0.0.0.0:8080"})
+	if err == nil {
+		t.Fatal("expected a non-loopback listener without a token to be rejected")
+	}
+	if !strings.Contains(err.Error(), "GRADOPS_API_TOKEN") {
+		t.Fatalf("error should name the missing token variable, got %v", err)
+	}
+}
+
+func TestAPITokenAllowsNonLoopback(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{
+		"GRADOPS_ADDR":      "0.0.0.0:8080",
+		"GRADOPS_API_TOKEN": "0123456789abcdef",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.APIToken != "0123456789abcdef" {
+		t.Fatalf("token = %q", cfg.APIToken)
+	}
+}
+
+func TestShortAPITokenIsRejected(t *testing.T) {
+	_, err := loadWith(t, map[string]string{"GRADOPS_API_TOKEN": "short"})
+	if err == nil {
+		t.Fatal("expected a short token to be rejected")
+	}
+}
+
+func TestLocalhostHostnameIsAllowedWithoutAToken(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{"GRADOPS_ADDR": "localhost:8080"}); err != nil {
+		t.Fatalf("localhost should count as loopback: %v", err)
 	}
 }
