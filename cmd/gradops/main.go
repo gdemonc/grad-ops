@@ -132,6 +132,7 @@ func run() error {
 		RequireRunAsMatch: cfg.RequireRunAsMatch,
 		RunAs:             cfg.ExecutorUser,
 		Limits:            cfg.Limits,
+		ExecutionTimeout:  cfg.ExecutionTimeout,
 	}, executor.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
 		return fmt.Errorf("build executor: %w", err)

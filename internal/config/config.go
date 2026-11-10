@@ -37,6 +37,7 @@ const (
 	envRequireRunAs    = "GRADOPS_REQUIRE_RUN_AS_MATCH"
 	envProbeConsole    = "GRADOPS_PROBE_CONSOLE"
 	envInvestigation   = "GRADOPS_INVESTIGATION_TIMEOUT"
+	envExecution       = "GRADOPS_EXECUTION_TIMEOUT"
 	envAPIToken        = "GRADOPS_API_TOKEN"
 	envExecutorUser    = "GRADOPS_EXECUTOR_USER"
 	envPrlimit         = "GRADOPS_PRLIMIT"
@@ -64,6 +65,7 @@ const (
 	defaultTTL           = 15 * time.Minute
 	defaultProbe         = 10 * time.Second
 	defaultInvestigation = 5 * time.Minute
+	defaultExecution     = 5 * time.Minute
 	defaultMaxOutput     = 64 << 10
 	defaultPrlimit       = "/usr/bin/prlimit"
 	maxBodyLimit         = 8 << 20
@@ -135,6 +137,9 @@ type Config struct {
 	// InvestigationTimeout bounds one task's investigation across probes and
 	// model calls.
 	InvestigationTimeout time.Duration
+	// ExecutionTimeout bounds one approved action's execution. It is an
+	// emergency ceiling on top of the contract's own runtime timeout.
+	ExecutionTimeout time.Duration
 	// ExecutorUser is the Linux identity that probes, actions and verification
 	// run as. Empty keeps the service identity; otherwise every shell must
 	// actually assume this identity or startup fails.
@@ -178,6 +183,7 @@ func Load() (Config, error) {
 		ApprovalTTL:          defaultTTL,
 		ProbeTimeout:         defaultProbe,
 		InvestigationTimeout: defaultInvestigation,
+		ExecutionTimeout:     defaultExecution,
 		MaxOutputBytes:       defaultMaxOutput,
 		EnableWorker:         true,
 		ExecutorUser:         getenv(envExecutorUser, ""),
@@ -283,6 +289,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s must be a duration between 1ns and 30m", envInvestigation)
 		}
 		cfg.InvestigationTimeout = timeout
+	}
+
+	if raw := strings.TrimSpace(os.Getenv(envExecution)); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 || timeout > 24*time.Hour {
+			return Config{}, fmt.Errorf("%s must be a duration between 1ns and 24h", envExecution)
+		}
+		cfg.ExecutionTimeout = timeout
 	}
 
 	if raw := strings.TrimSpace(os.Getenv(envMaxOutput)); raw != "" {

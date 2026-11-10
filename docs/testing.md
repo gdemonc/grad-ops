@@ -2,7 +2,7 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-09，Ubuntu 26.04.1 LTS，Go 1.27.3，`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、179 个 `Test` 函数；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-09，Ubuntu 26.04.1 LTS，Go 1.27.3，`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、183 个 `Test` 函数；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
 
 ## 如何运行
 
@@ -36,6 +36,7 @@ go test -race ./... -count=1
 | 两阶段模型计划器驱动真实调查，提案携带补偿动作 | `investigation/model_test.go`：`TestModelPlannerDrivesARealInvestigation`、`TestModelPlannerProposalCarriesCompensation` |
 | 主程序正确装配模型客户端 | `cmd/gradops/main_test.go`：`TestBuildPlannerWiresTheModelClient` |
 | 单次调查总时限覆盖探针与模型调用 | `investigation/model_test.go`：`TestInvestigationStopsAtTheTotalTimeout`；`config/config_test.go`：`TestInvestigationTimeoutDefaultsAndParses` |
+| 执行/回滚超时记为 UNKNOWN/失败但结果仍落库 | `executor/executor_test.go`：`TestExecutionCeilingIsRecordedAsUnknown`、`TestCancelledRequestStillRecordsTheUnknownOutcome`；`executor/recovery_test.go`：`TestRecoveryCeilingIsRecordedAsFailure`；`config/config_test.go`：`TestExecutionTimeoutDefaultsAndParses` |
 | 被完全攻陷的模型仍不能直接写主机或绕过审批 | `investigation/adversarial_test.go`：`TestCompromisedModelCannotMakeAProbeWrite`、`TestCompromisedModelCannotHideAWriteBehindObserve`、`TestCompromisedModelCannotExecuteWithoutApproval`、`TestCompromisedModelCannotBypassTheResponseBound` |
 | observe 契约中的写操作在执行前被拒绝 | `executor/executor_test.go`：`TestRejectsObserveContractWithWrite` |
 | 验证命令不能修改系统 | `verify/verify_test.go`：`TestRejectsMutatingPostcondition` |
@@ -69,8 +70,8 @@ go test -race ./... -count=1
 - **AST 分析的完整性**：分析器只识别已知命令和已知间接执行形式；未知命令、运行时展开、外部脚本和复杂数据流仍可能写文件。它被明确当作辅助校验，不是沙箱。
 - **提示注入**：已有模型客户端和两阶段计划器，但没有系统性的提示注入对抗测试；任务文本和观测仍被当作提示中的不可信数据，真正的边界是只读分析、Policy、Approval 和 Runtime。
 - **真实 LLM provider**：客户端只用本地 `httptest` 和函数替身验证过，没有用真实 API key 跑过任何 provider。
-- **总耗时预算**：调查阶段已有 `GRADOPS_INVESTIGATION_TIMEOUT` 总时限（默认 5 分钟），覆盖探针与模型调用；执行、审批等待和人工复核没有任务级总时限。
-- **故障注入**：进程崩溃、磁盘写满、目标文件并发变化、验证超时都没有模拟。
+- **总耗时预算**：调查阶段有 `GRADOPS_INVESTIGATION_TIMEOUT`（默认 5 分钟），单次执行/补偿有 `GRADOPS_EXECUTION_TIMEOUT`（默认 5 分钟）；审批等待、人工复核和整条任务没有总时限。
+- **故障注入**：执行/回滚超时和请求取消已有测试；进程崩溃、磁盘写满、目标文件并发变化、验证超时没有模拟。
 - **多进程并发**：单连接 SQLite 与单进程 Worker 是设计前提；多实例同时运行没有测试。
 - **API 细粒度授权**：只有可选的单一 Bearer token，没有用户、角色、任务级权限或多租户隔离；未设置 token 时同机进程仍可调用 API。
 - **Linux CI**：以上结果来自一台开发机的本地运行，不是 CI 产物。Ubuntu LTS 的版本支持仍需 CI 固化。

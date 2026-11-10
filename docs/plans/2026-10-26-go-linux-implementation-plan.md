@@ -47,7 +47,7 @@
 - [x] 测试超时、输出上限、环境清理、CPU/内存/PID/文件大小预算、进程组终止和调用轮次。（超时、输出上限、环境清理、调用预算、进程组终止已有测试；CPU/地址空间/进程数/文件大小/fd 由 prlimit 测试覆盖；cgroup 级预算仍未实现）
 - [ ] 实现统一 Command/Tool Adapter 接口；不实现 MCP Client。
 - [x] OpenAI 兼容 LLM client，支持测试替身（`llm.CompleterFunc`）；提供两阶段模型计划器，默认部署仍为 `StubPlanner`。真实 provider 尚未用密钥验证。
-- [ ] 调查轮次、工具调用次数、总耗时和输出 token 预算。（部分：已限制探针数、单次 provider 超时、补全 token、shell 调用次数，并有 `GRADOPS_INVESTIGATION_TIMEOUT` 调查总时限；执行、审批等待和人工复核没有任务级总时限）
+- [ ] 调查轮次、工具调用次数、总耗时和输出 token 预算。（部分：已限制探针数、单次 provider 超时、补全 token、shell 调用次数，并有 `GRADOPS_INVESTIGATION_TIMEOUT` 调查总时限与 `GRADOPS_EXECUTION_TIMEOUT` 单次执行上限；审批等待、人工复核和整条任务没有总时限）
 - [x] Grounding 只接受真实 evidence ID。
 - [ ] 对提示注入、未知工具、畸形 JSON 和预算耗尽编写对抗测试。（部分：畸形 JSON、未知动作类型、预算耗尽已有测试；提示注入未覆盖）
 

@@ -126,7 +126,7 @@ POST /api/tasks
 - **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`。配置 `GRADOPS_EXECUTOR_USER` 后，服务会解析该账号并真正切换 uid/gid；非 root 进程无法切换到其他用户时启动失败。未配置时仍以服务进程身份运行，此时设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 会拒绝身份不一致的契约并写入 `execution.rejected`。uid 切换的成功路径尚未在 root 环境实测。
 - **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前只提供进程组、超时、输出上限、环境白名单、prlimit 资源限制和可选 uid 切换，没有 namespace/cgroup/文件系统/网络隔离。
 - **资源限制依赖 util-linux**：`prlimit` 缺失时服务会拒绝启动；限制值默认适合只读探针和小文件，不保证兼容所有运维命令。
-- **时限**：`GRADOPS_INVESTIGATION_TIMEOUT` 限制调查阶段（探针 + 模型调用），默认 5 分钟；审批等待、人工复核和执行阶段不在这条时限内。
+- **时限**：`GRADOPS_INVESTIGATION_TIMEOUT` 限制调查阶段（探针 + 模型调用），默认 5 分钟；`GRADOPS_EXECUTION_TIMEOUT` 限制单个已批准动作/补偿的紧急执行上限，默认 5 分钟。审批等待和人工复核没有任务级时限。
 - **API 认证**：设置 `GRADOPS_API_TOKEN` 后所有 `/api` 路由要求 Bearer token；未设置时只允许 `127.0.0.1` / `localhost` / `::1` 监听，同机进程仍可无认证调用。当前没有用户、角色或按任务的细粒度授权。
 - **模型数据边界**：`GRADOPS_PLANNER=model` 会把任务文本和截断后的探针观测发送给配置的 provider；尚未实现提示内容的秘密扫描。API Key 不进入 shell 环境、日志或数据库，但 provider 本身必须被信任到相应程度。默认 `stub` 不发送任何外部数据。
 - **审计链**只防御朴素篡改，DB 拥有者仍可重写整条链；信任边界见[威胁模型](docs/threat-model.md)。
@@ -173,6 +173,7 @@ sudo deploy/install.sh ./bin/gradops
 | `GRADOPS_APPROVAL_TTL` | `15m` | 审批 token 有效期，最长 24h |
 | `GRADOPS_PROBE_TIMEOUT` | `10s` | 单次探针/验证命令超时 |
 | `GRADOPS_INVESTIGATION_TIMEOUT` | `5m` | 单次调查的总时限（探针 + 模型调用），最长 30 分钟 |
+| `GRADOPS_EXECUTION_TIMEOUT` | `5m` | 单个已批准动作/补偿的紧急执行上限，最长 24 小时；契约自身的 Runtime 超时仍然有效 |
 | `GRADOPS_MAX_OUTPUT_BYTES` | `65536` | 每个输出流上限 |
 | `GRADOPS_WORKER` | `true` | 是否在本进程运行作业循环 |
 | `GRADOPS_REQUIRE_RUN_AS_MATCH` | `false` | 开启后契约声明的 `run_as` 必须等于当前进程身份，否则拒绝执行 |

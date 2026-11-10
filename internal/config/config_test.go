@@ -214,3 +214,25 @@ func TestLocalhostHostnameIsAllowedWithoutAToken(t *testing.T) {
 		t.Fatalf("localhost should count as loopback: %v", err)
 	}
 }
+
+func TestExecutionTimeoutDefaultsAndParses(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ExecutionTimeout != 5*time.Minute {
+		t.Fatalf("default execution timeout = %s", cfg.ExecutionTimeout)
+	}
+
+	cfg, err = loadWith(t, map[string]string{"GRADOPS_EXECUTION_TIMEOUT": "45s"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ExecutionTimeout != 45*time.Second {
+		t.Fatalf("execution timeout = %s", cfg.ExecutionTimeout)
+	}
+
+	if _, err := loadWith(t, map[string]string{"GRADOPS_EXECUTION_TIMEOUT": "0"}); err == nil {
+		t.Fatal("expected zero to be rejected")
+	}
+}
