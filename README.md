@@ -128,6 +128,7 @@ POST /api/tasks
 
 - **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
 - **bubblewrap 沙箱**：代码已实现，部署示例启用 `bubblewrap`；真实 systemd 服务上启动探测通过，任务探针在沙箱内完成并封存。默认 `.env.example` 仍为 `none`，需要显式启用。
+- **隔离粒度**：`Session` 每次 `Run` 新建 cgroup/namespace；`Console` 的 cgroup/namespace 从 `NewConsole` 存活到 `Close`，一次调查的多条探针共享它，但不会跨 Action 复用。可写路径是全局 `GRADOPS_ALLOWED_ROOTS`，网络只有隔离/共享两种模式，没有 IP/端口/DNS allowlist；symlink/TOCTOU 未防护。
 - **per-action cgroup**：`cgroup-v2` 模式已安装到真实 systemd 主机，并在 delegated cgroup 上用 shell 集成测试验证了子 cgroup 创建、`memory.max`/`pids.max`/`cpu.max` 生效和超时清理；默认仍是 `direct`，只使用 prlimit。systemd unit 已配置 `Delegate=yes`、`DelegateSubgroup=supervisor`。
 - **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`。配置 `GRADOPS_EXECUTOR_USER` 后，服务会解析该账号并真正切换 uid/gid；非 root 进程无法切换到其他用户时启动失败。未配置时仍以服务进程身份运行，此时设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 会拒绝身份不一致的契约并写入 `execution.rejected`。uid 切换的成功路径尚未在 root 环境实测。
 - **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前提供进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid 切换、可选 per-action cgroup v2 和可选 bubblewrap 沙箱；bubblewrap 默认关闭，部署示例启用并已在真实 systemd 服务中验证。
@@ -202,7 +203,7 @@ sudo scripts/verify-cgroup.sh
 | `GRADOPS_RLIMIT_NPROC` | `256` | 服务用户可创建的进程数上限；`0` 表示不限制 |
 | `GRADOPS_RLIMIT_FSIZE_BYTES` | `16777216` | 单个文件大小上限（16 MiB）；`0` 表示不限制 |
 | `GRADOPS_RLIMIT_NOFILE` | `256` | 打开文件描述符上限；`0` 表示不限制 |
-| `GRADOPS_PROBE_CONSOLE` | `false` | 开启后同一次调查的探针共享一个常驻 Bash 进程；默认每次探针独立进程 |
+| `GRADOPS_PROBE_CONSOLE` | `false` | 开启后同一次调查的探针共享一个常驻 Bash、cgroup 和 sandbox；默认每次探针独立进程/边界 |
 | `GRADOPS_PLANNER` | `stub` | `stub`：固定只读探针；`model`：OpenAI 兼容模型规划 |
 | `GRADOPS_LLM_BASE_URL` | 空 | `model` 模式必填，例如 `https://api.example.com/v1`；仅回环地址允许明文 HTTP |
 | `GRADOPS_LLM_API_KEY` | 空 | Bearer token；不写日志、不落库 |

@@ -207,10 +207,9 @@ func (s *Session) Run(ctx context.Context, script string) (result Result, runErr
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare cgroup: %w", err)
 	}
+	var killErr error
 	defer func() {
-		if closeErr := guard.close(); closeErr != nil {
-			runErr = errors.Join(runErr, closeErr)
-		}
+		runErr = errors.Join(runErr, killErr, guard.close())
 	}()
 	if err := guard.attach(command); err != nil {
 		return Result{}, fmt.Errorf("attach cgroup: %w", err)
@@ -236,7 +235,7 @@ func (s *Session) Run(ctx context.Context, script string) (result Result, runErr
 		timedOut = true
 		// Kill the whole cgroup and process group: a script that backgrounded
 		// work, or escaped its process group, must not outlive its turn.
-		_ = guard.kill()
+		killErr = guard.kill()
 		killProcess(command)
 		select {
 		case waitErr = <-waited:

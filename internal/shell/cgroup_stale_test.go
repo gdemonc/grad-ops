@@ -15,11 +15,6 @@ func TestCleanupStaleCgroupsRemovesOnlyGradopsChildren(t *testing.T) {
 	if err := os.Mkdir(stale, 0o755); err != nil {
 		t.Fatalf("mkdir stale: %v", err)
 	}
-	// A real cgroup.kill is a special file. Make the directory read-only so
-	// the test exercises the kill failure and still removes the empty dir.
-	if err := os.Chmod(stale, 0o555); err != nil {
-		t.Fatalf("chmod stale: %v", err)
-	}
 	if err := os.Mkdir(other, 0o755); err != nil {
 		t.Fatalf("mkdir other: %v", err)
 	}

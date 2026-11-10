@@ -28,11 +28,13 @@ const endMarker = "__GRADOPS_CALL_END__"
 
 // Console is a persistent Bash process shared by several calls.
 //
-// Unlike Session, which starts a fresh shell for every script, a Console keeps
-// its state: environment, working directory, shell functions and background
-// jobs survive between calls. That is the point of a session, and it is also
-// why the executor does not use one: an approved contract must not depend on
-// what an earlier, unrelated script left behind.
+// Unlike Session, which starts a fresh shell (and, when enabled, a fresh
+// cgroup and bubblewrap namespace) for every script, a Console creates its
+// cgroup and sandbox once and keeps them for the lifetime of the Console:
+// environment, working directory, shell functions and background jobs survive
+// between calls. It is scoped to one investigation's probe sequence, not to
+// independent actions; the executor does not use a Console because an approved
+// contract must not depend on what an earlier, unrelated script left behind.
 type Console struct {
 	cfg Config
 

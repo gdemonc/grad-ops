@@ -93,7 +93,15 @@ func cleanupStaleCgroups(base string) error {
 			continue
 		}
 		dir := filepath.Join(base, entry.Name())
-		_ = os.WriteFile(filepath.Join(dir, "cgroup.kill"), []byte("1"), 0o644)
+		var errs []error
+		killPath := filepath.Join(dir, "cgroup.kill")
+		if _, statErr := os.Stat(killPath); statErr == nil {
+			if err := os.WriteFile(killPath, []byte("1"), 0o644); err != nil {
+				errs = append(errs, fmt.Errorf("%w: kill stale cgroup %q: %v", ErrCleanupFailed, dir, err))
+			}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("%w: stat stale cgroup kill file %q: %v", ErrCleanupFailed, dir, statErr))
+		}
 		var removeErr error
 		for attempt := 0; attempt < 100; attempt++ {
 			removeErr = os.Remove(dir)
@@ -107,7 +115,10 @@ func cleanupStaleCgroups(base string) error {
 			time.Sleep(10 * time.Millisecond)
 		}
 		if removeErr != nil {
-			return fmt.Errorf("%w: remove stale cgroup %q: %v", ErrCleanupFailed, dir, removeErr)
+			errs = append(errs, fmt.Errorf("%w: remove stale cgroup %q: %v", ErrCleanupFailed, dir, removeErr))
+		}
+		if err := errors.Join(errs...); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -204,7 +215,9 @@ func (g *cgroupGuard) close() error {
 		errs = append(errs, err)
 	}
 	if g.fd != nil {
-		_ = g.fd.Close()
+		if err := g.fd.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("%w: close cgroup fd %q: %v", ErrCleanupFailed, g.dir, err))
+		}
 		g.fd = nil
 	}
 

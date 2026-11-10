@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -155,7 +158,7 @@ func TestCgroupMemoryLimitIsEnforced(t *testing.T) {
 		t.Fatalf("new session: %v", err)
 	}
 	result, err := session.Run(context.Background(),
-		`set -o pipefail; head -c 67108864 /dev/zero | tr '\0' x >/dev/null`)
+		`path=$(cut -d: -f3 /proc/self/cgroup); echo 0 > "/sys/fs/cgroup$path/memory.swap.max" 2>/dev/null || true; x=$(head -c 67108864 /dev/zero | tr '\0' x)`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -179,11 +182,32 @@ func TestCgroupTimeoutKillsAnEscapedProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
-	result, err := session.Run(context.Background(), `setsid sleep 5 & wait`)
+	marker := filepath.Join(cfg.WorkDir, "escaped.pid")
+	script := fmt.Sprintf(`setsid sh -c 'echo $$ > %q; exec sleep 5' & wait`, marker)
+	result, err := session.Run(context.Background(), script)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !result.TimedOut {
 		t.Fatalf("expected a timeout, got %+v", result)
+	}
+
+	rawPID, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read escaped pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(rawPID)))
+	if err != nil || pid <= 0 {
+		t.Fatalf("invalid escaped pid %q: %v", rawPID, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("escaped process %d is still alive after timeout", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
