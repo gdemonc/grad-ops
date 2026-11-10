@@ -26,7 +26,15 @@ for directive in \
   'PrivateTmp=yes' \
   'ProtectSystem=full' \
   'ProtectHome=yes' \
-  'RestrictNamespaces=yes' \
+  'ProtectKernelTunables=no' \
+  'ProtectKernelModules=no' \
+  'ProtectKernelLogs=no' \
+  'ProtectClock=no' \
+  'ProtectHostname=no' \
+  'Delegate=yes' \
+  'DelegateSubgroup=supervisor' \
+  'ProtectControlGroups=no' \
+  'RestrictNamespaces=no' \
   'RestrictSUIDSGID=yes' \
   'KillMode=control-group' \
   'MemoryMax=' \
@@ -37,12 +45,13 @@ done
 if grep -Eq '^User=root$' "$UNIT"; then
   fail "the unit must not run as root"
 fi
-if grep -Eq '^CapabilityBoundingSet=.*[A-Za-z]' "$UNIT"; then
-  fail "CapabilityBoundingSet must be empty"
-fi
+grep -q '^CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_MKNOD CAP_DAC_OVERRIDE' "$UNIT" \
+  || fail "CapabilityBoundingSet must contain only the bubblewrap set"
 
 grep -q 'GRADOPS_API_TOKEN=' "$ENV_FILE" || fail "environment example lacks the API token"
 grep -q 'GRADOPS_ADDR=127.0.0.1' "$ENV_FILE" || fail "environment example should default to loopback"
+grep -q 'GRADOPS_RUNTIME=cgroup-v2' "$ENV_FILE" || fail "environment example should enable cgroup runtime"
+grep -q 'GRADOPS_SANDBOX=bubblewrap' "$ENV_FILE" || fail "environment example should enable bubblewrap"
 grep -q 'GRADOPS_DB_PATH=/var/lib/gradops/' "$ENV_FILE" || fail "database should live in StateDirectory"
 
 bash -n "$INSTALL"
@@ -62,6 +71,18 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   if grep -Eq 'Failed to parse|Unknown lvalue|Invalid setting' <<<"$output"; then
     echo "$output" >&2
     fail "systemd-analyze reported an unusable directive"
+  fi
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+  version="$(systemctl --version | awk 'NR == 1 { print $2 }')"
+  case "$version" in
+    ''|*[!0-9]*)
+      fail "could not parse the systemd version"
+      ;;
+  esac
+  if (( version < 254 )); then
+    fail "systemd $version is too old; DelegateSubgroup requires systemd 254+"
   fi
 fi
 

@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 客户端与两阶段计划器已实现（默认仍用 stub），Linux Runtime 的 namespace/cgroup/systemd 隔离尚未实现，uid 切换与 prlimit 资源限制已实现。详见[当前实现状态](#当前实现状态)。
+> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 客户端与两阶段计划器已实现（默认仍用 stub），Linux Runtime 的 per-action cgroup v2（可选）、uid 切换、prlimit 资源限制和可选的 bubblewrap 命名空间/文件系统沙箱已实现，并已在真实 systemd 服务中验证。详见[当前实现状态](#当前实现状态)。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -82,20 +82,22 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 一次性审批：只存哈希、绑定契约摘要、单条 SQL 原子消费 | 已实现 |
 | Executor：重算摘要、复核策略、原子占用、执行 | 已实现 |
 | Linux 资源限制：CPU、地址空间、进程数、文件大小、文件描述符 | 已实现：通过 `prlimit` 在 shell 启动前应用，默认开启，可逐项设为 `0` 关闭 |
+| per-action cgroup v2 边界 | 已实现并验证：`GRADOPS_RUNTIME=cgroup-v2` 时每个 shell 启动在独立子 cgroup，设置内存/进程/CPU 限制；真实 systemd delegated cgroup 上验证了 `memory.max`、`pids.max`、`cpu.max` 和超时清理。kill/close 失败会向调用者报告，启动时清理残留的 `gradops-*` 子 cgroup |
 | 执行身份切换 | 部分实现：配置 `GRADOPS_EXECUTOR_USER` 后以该身份运行探针、动作和验证；非 root 无法切换时启动失败。未配置时仍以服务进程身份运行 |
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
 | LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
-| Linux 隔离（namespace、cgroup、systemd、文件系统、网络） | **未实现**：目前有进程组、超时、输出上限、环境白名单、资源限制和可选的 uid 切换 |
+| per-action bubblewrap 沙箱 | 已实现并验证：`GRADOPS_SANDBOX=bubblewrap` 时使用独立 mount/PID/IPC/UTS/user/network namespace、只读根和按策略绑定的可写根；真实 systemd 服务上启动校验通过，任务探针在沙箱内完成并封存 |
+| Linux 隔离（systemd、文件系统、网络） | **已实现（可选）**：bubblewrap 沙箱提供 namespace、只读根和默认隔离网络；默认 `.env.example` 为 `none`，部署示例启用 `bubblewrap` |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
-| Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0（[run #5](https://github.com/gdemonc/grad-ops/actions/runs/42763868185)） |
-| systemd 部署 | 已提供 hardened unit、环境文件示例、安装脚本和静态检查；`systemd-analyze verify` 通过，尚未在真实 systemd 主机完成安装运行 |
+| Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)） |
+| systemd 部署 | 已实现：hardened unit、环境文件、安装脚本和静态检查；要求 systemd 254+（`DelegateSubgroup`）；已在真实 systemd 主机安装运行，per-action cgroup 验证通过；`ProtectSystem`/`PrivateTmp` 等 unit 边界的逐项运行效果未单独测试 |
 
 ### 已验证 / 未验证
 
-- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）。
-- **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、namespace、cgroup、systemd 单元、真实 `/var/log` 路径下的文件边界、文件系统/网络隔离。这些不能因为测试套件全绿而被视为已实现。
-- **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证（[run #5](https://github.com/gdemonc/grad-ops/actions/runs/42763868185)）。
+- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）；per-action cgroup v2 在真实 systemd delegated cgroup 上通过 shell 集成测试（`memory.max=67108864`、`pids.max=32`、`cpu.max=50000 100000`、超时清理、无残留子 cgroup）；bubblewrap 沙箱在真实 systemd 服务中完成启动探测，worker 探针在沙箱内执行并到达 `SEALED`，root-only/loopback-only 集成测试通过。
+- **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、cgroup 的 `cpuset`/`io` 控制器。这些不能因为测试套件全绿而被视为已实现。
+- **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)）。
 - 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用此前的开发机结果，本次未重跑。
 
 ### 一条任务会经历什么
@@ -125,8 +127,11 @@ POST /api/tasks
 ### 已知限制（不是待办清单的装饰）
 
 - **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
+- **bubblewrap 沙箱**：代码已实现，部署示例启用 `bubblewrap`；真实 systemd 服务上启动探测通过，任务探针在沙箱内完成并封存。默认 `.env.example` 仍为 `none`，需要显式启用。
+- **隔离粒度**：`Session` 每次 `Run` 新建 cgroup/namespace；`Console` 的 cgroup/namespace 从 `NewConsole` 存活到 `Close`，一次调查的多条探针共享它，但不会跨 Action 复用。可写路径是全局 `GRADOPS_ALLOWED_ROOTS`，网络只有隔离/共享两种模式，没有 IP/端口/DNS allowlist；symlink/TOCTOU 未防护。
+- **per-action cgroup**：`cgroup-v2` 模式已安装到真实 systemd 主机，并在 delegated cgroup 上用 shell 集成测试验证了子 cgroup 创建、`memory.max`/`pids.max`/`cpu.max` 生效和超时清理；默认仍是 `direct`，只使用 prlimit。systemd unit 已配置 `Delegate=yes`、`DelegateSubgroup=supervisor`。
 - **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`。配置 `GRADOPS_EXECUTOR_USER` 后，服务会解析该账号并真正切换 uid/gid；非 root 进程无法切换到其他用户时启动失败。未配置时仍以服务进程身份运行，此时设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 会拒绝身份不一致的契约并写入 `execution.rejected`。uid 切换的成功路径尚未在 root 环境实测。
-- **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前只提供进程组、超时、输出上限、环境白名单、prlimit 资源限制和可选 uid 切换，没有 namespace/cgroup/文件系统/网络隔离。
+- **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前提供进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid 切换、可选 per-action cgroup v2 和可选 bubblewrap 沙箱；bubblewrap 默认关闭，部署示例启用并已在真实 systemd 服务中验证。
 - **资源限制依赖 util-linux**：`prlimit` 缺失时服务会拒绝启动；限制值默认适合只读探针和小文件，不保证兼容所有运维命令。
 - **时限**：`GRADOPS_INVESTIGATION_TIMEOUT` 限制调查阶段（探针 + 模型调用），默认 5 分钟；`GRADOPS_EXECUTION_TIMEOUT` 限制单个已批准动作/补偿的紧急执行上限，默认 5 分钟。审批等待和人工复核没有任务级时限。
 - **API 认证**：设置 `GRADOPS_API_TOKEN` 后所有 `/api` 路由要求 Bearer token；未设置时只允许 `127.0.0.1` / `localhost` / `::1` 监听，同机进程仍可无认证调用。当前没有用户、角色或按任务的细粒度授权。
@@ -156,6 +161,7 @@ systemd 部署：
 ```bash
 go build -o bin/gradops ./cmd/gradops
 sudo deploy/install.sh ./bin/gradops
+sudo scripts/verify-cgroup.sh
 ```
 
 细节、权限和边界见 [systemd 部署](deploy/README.md)。
@@ -177,6 +183,15 @@ sudo deploy/install.sh ./bin/gradops
 | `GRADOPS_APPROVAL_TTL` | `15m` | 审批 token 有效期，最长 24h |
 | `GRADOPS_PROBE_TIMEOUT` | `10s` | 单次探针/验证命令超时 |
 | `GRADOPS_INVESTIGATION_TIMEOUT` | `5m` | 单次调查的总时限（探针 + 模型调用），最长 30 分钟 |
+| `GRADOPS_RUNTIME` | `direct` | `direct` 或 `cgroup-v2`；后者要求可写的 delegated cgroup v2 子树 |
+| `GRADOPS_CGROUP_ROOT` | 空 | 可选，delegated cgroup 目录；为空时从 `/proc/self/cgroup` 推导 |
+| `GRADOPS_CGROUP_MEMORY_MAX_BYTES` | `536870912` | 每个 shell 的 cgroup 内存上限 |
+| `GRADOPS_CGROUP_PIDS_MAX` | `256` | 每个 shell 的 cgroup 进程数上限 |
+| `GRADOPS_CGROUP_CPU_QUOTA_MICROS` | `0` | cgroup CPU 配额；`0` 表示不节流 |
+| `GRADOPS_CGROUP_CPU_PERIOD_MICROS` | `100000` | cgroup CPU 周期 |
+| `GRADOPS_SANDBOX` | `none` | `none` 或 `bubblewrap` |
+| `GRADOPS_BWRAP` | `/usr/bin/bwrap` | bubblewrap 绝对路径 |
+| `GRADOPS_SANDBOX_NETWORK` | `false` | `true` 保留宿主网络命名空间；默认只有 loopback |
 | `GRADOPS_EXECUTION_TIMEOUT` | `5m` | 单个已批准动作/补偿的紧急执行上限，最长 24 小时；契约自身的 Runtime 超时仍然有效 |
 | `GRADOPS_MAX_OUTPUT_BYTES` | `65536` | 每个输出流上限 |
 | `GRADOPS_WORKER` | `true` | 是否在本进程运行作业循环 |
@@ -188,7 +203,7 @@ sudo deploy/install.sh ./bin/gradops
 | `GRADOPS_RLIMIT_NPROC` | `256` | 服务用户可创建的进程数上限；`0` 表示不限制 |
 | `GRADOPS_RLIMIT_FSIZE_BYTES` | `16777216` | 单个文件大小上限（16 MiB）；`0` 表示不限制 |
 | `GRADOPS_RLIMIT_NOFILE` | `256` | 打开文件描述符上限；`0` 表示不限制 |
-| `GRADOPS_PROBE_CONSOLE` | `false` | 开启后同一次调查的探针共享一个常驻 Bash 进程；默认每次探针独立进程 |
+| `GRADOPS_PROBE_CONSOLE` | `false` | 开启后同一次调查的探针共享一个常驻 Bash、cgroup 和 sandbox；默认每次探针独立进程/边界 |
 | `GRADOPS_PLANNER` | `stub` | `stub`：固定只读探针；`model`：OpenAI 兼容模型规划 |
 | `GRADOPS_LLM_BASE_URL` | 空 | `model` 模式必填，例如 `https://api.example.com/v1`；仅回环地址允许明文 HTTP |
 | `GRADOPS_LLM_API_KEY` | 空 | Bearer token；不写日志、不落库 |

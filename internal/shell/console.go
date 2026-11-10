@@ -28,16 +28,19 @@ const endMarker = "__GRADOPS_CALL_END__"
 
 // Console is a persistent Bash process shared by several calls.
 //
-// Unlike Session, which starts a fresh shell for every script, a Console keeps
-// its state: environment, working directory, shell functions and background
-// jobs survive between calls. That is the point of a session, and it is also
-// why the executor does not use one: an approved contract must not depend on
-// what an earlier, unrelated script left behind.
+// Unlike Session, which starts a fresh shell (and, when enabled, a fresh
+// cgroup and bubblewrap namespace) for every script, a Console creates its
+// cgroup and sandbox once and keeps them for the lifetime of the Console:
+// environment, working directory, shell functions and background jobs survive
+// between calls. It is scoped to one investigation's probe sequence, not to
+// independent actions; the executor does not use a Console because an approved
+// contract must not depend on what an earlier, unrelated script left behind.
 type Console struct {
 	cfg Config
 
 	dir    string
 	cmd    *exec.Cmd
+	cgroup *cgroupGuard
 	stdin  io.WriteCloser
 	reader *bufio.Reader
 	diag   *cappedBuffer
@@ -70,14 +73,26 @@ func NewConsole(cfg Config) (*Console, error) {
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("prepare console: %w", err)
 	}
+	guard, err := newCgroupGuard(cfg.Cgroup)
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("prepare console cgroup: %w", err)
+	}
+	if err := guard.attach(command); err != nil {
+		_ = guard.close()
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("attach console cgroup: %w", err)
+	}
 
 	stdin, err := command.StdinPipe()
 	if err != nil {
+		_ = guard.close()
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("console stdin: %w", err)
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
+		_ = guard.close()
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("console stdout: %w", err)
 	}
@@ -85,6 +100,7 @@ func NewConsole(cfg Config) (*Console, error) {
 	command.Stderr = diag
 
 	if err := command.Start(); err != nil {
+		_ = guard.close()
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("start console: %w", err)
 	}
@@ -93,6 +109,7 @@ func NewConsole(cfg Config) (*Console, error) {
 		cfg:    cfg,
 		dir:    dir,
 		cmd:    command,
+		cgroup: guard,
 		stdin:  stdin,
 		reader: bufio.NewReaderSize(stdout, 4096),
 		diag:   diag,
@@ -128,10 +145,16 @@ func (c *Console) Close() error {
 	c.dead = true
 	c.mu.Unlock()
 
+	var errs []error
+	closeStdin := func() {
+		if err := c.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			errs = append(errs, fmt.Errorf("%w: close console stdin: %v", ErrCleanupFailed, err))
+		}
+	}
 	if !dead {
 		// Sending EOF makes Bash exit on its own terms; a shell that ignores it
 		// is killed, and the wait below is what actually reaps it.
-		_ = c.stdin.Close()
+		closeStdin()
 		select {
 		case <-c.waited:
 		case <-time.After(killGrace):
@@ -141,11 +164,19 @@ func (c *Console) Close() error {
 			<-c.waited
 		}
 	} else {
-		_ = c.stdin.Close()
+		closeStdin()
 	}
 
-	os.RemoveAll(c.dir)
-	return nil
+	if c.cgroup != nil {
+		if err := c.cgroup.close(); err != nil {
+			errs = append(errs, err)
+		}
+		c.cgroup = nil
+	}
+	if err := os.RemoveAll(c.dir); err != nil {
+		errs = append(errs, fmt.Errorf("%w: remove console dir %q: %v", ErrCleanupFailed, c.dir, err))
+	}
+	return errors.Join(errs...)
 }
 
 // Run executes one script in the persistent shell.
@@ -221,6 +252,19 @@ func (c *Console) Run(ctx context.Context, script string) (Result, error) {
 	case <-callCtx.Done():
 		c.markDead()
 		killProcess(c.cmd)
+		if c.cgroup != nil {
+			if err := c.cgroup.kill(); err != nil {
+				return Result{
+					Script:   script,
+					ExitCode: -1,
+					Stdout:   c.readCapped(outPath),
+					Stderr:   c.readCapped(errPath),
+					TimedOut: true,
+					Duration: time.Since(started),
+					Call:     call,
+				}, err
+			}
+		}
 		return Result{
 			Script:   script,
 			ExitCode: -1,

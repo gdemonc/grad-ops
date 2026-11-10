@@ -66,6 +66,10 @@ type Config struct {
 	RunAs string
 	// Limits bounds the verification shell.
 	Limits shell.Limits
+	// Cgroup is the optional cgroup v2 boundary for the verification shell.
+	Cgroup shell.CgroupConfig
+	// Sandbox is the optional bubblewrap namespace/filesystem boundary.
+	Sandbox shell.SandboxConfig
 }
 
 // Option customises a Service.
@@ -89,6 +93,8 @@ type Service struct {
 	maxOutput  int
 	runAs      string
 	limits     shell.Limits
+	cgroup     shell.CgroupConfig
+	sandbox    shell.SandboxConfig
 	now        func() time.Time
 	mapWorkDir func(string) string
 }
@@ -117,6 +123,8 @@ func New(db *store.DB, ev *evidence.Store, cfg Config, opts ...Option) (*Service
 		maxOutput:  cfg.MaxOutputBytes,
 		runAs:      strings.TrimSpace(cfg.RunAs),
 		limits:     cfg.Limits,
+		cgroup:     cfg.Cgroup,
+		sandbox:    cfg.Sandbox,
 		now:        time.Now,
 		mapWorkDir: func(path string) string { return path },
 	}
@@ -164,6 +172,8 @@ func (s *Service) Verify(ctx context.Context, taskID int64) (Result, error) {
 		MaxCalls:       1,
 		RunAs:          s.runAs,
 		Limits:         s.limits,
+		Cgroup:         s.cgroup,
+		Sandbox:        s.sandbox,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare verification shell: %w", err)

@@ -114,6 +114,8 @@ type Service struct {
 	runAs            string
 	limits           shell.Limits
 	executionTimeout time.Duration
+	cgroup           shell.CgroupConfig
+	sandbox          shell.SandboxConfig
 }
 
 // Config is the executor's fixed configuration.
@@ -136,6 +138,10 @@ type Config struct {
 	// ExecutionTimeout is an emergency ceiling on one execution, on top of the
 	// contract's own runtime timeout. Zero uses the default.
 	ExecutionTimeout time.Duration
+	// Cgroup is the optional cgroup v2 boundary for the action shell.
+	Cgroup shell.CgroupConfig
+	// Sandbox is the optional bubblewrap namespace/filesystem boundary.
+	Sandbox shell.SandboxConfig
 }
 
 // New builds a service.
@@ -160,6 +166,8 @@ func New(db *store.DB, engine *policy.Engine, approvals *approval.Service, ev *e
 		runAs:             strings.TrimSpace(cfg.RunAs),
 		limits:            cfg.Limits,
 		executionTimeout:  cfg.ExecutionTimeout,
+		cgroup:            cfg.Cgroup,
+		sandbox:           cfg.Sandbox,
 	}
 	if service.executionTimeout <= 0 {
 		service.executionTimeout = 2 * time.Minute
@@ -315,6 +323,11 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 	}
 
 	switch {
+	case runErr != nil && errors.Is(runErr, shell.ErrCleanupFailed):
+		// The script may have completed, but its cgroup could not be killed or
+		// removed. Containment is unproven, so do not report success.
+		outcome.Status = StatusUnknown
+		outcome.Stderr = runErr.Error()
 	case runErr != nil && (ctx.Err() != nil || runCtx.Err() != nil):
 		// The process was interrupted while the script may have been running.
 		outcome.Status = StatusUnknown
@@ -599,6 +612,8 @@ func (s *Service) session(c contract.Contract) (*shell.Session, error) {
 		MaxCalls:       int(c.Runtime.MaxCalls),
 		RunAs:          s.runAs,
 		Limits:         s.limits,
+		Cgroup:         s.cgroup,
+		Sandbox:        s.sandbox,
 	})
 }
 

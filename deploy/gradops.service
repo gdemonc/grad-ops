@@ -22,19 +22,29 @@ KillMode=control-group
 # run-as identity to each shell; this unit keeps the whole process inside a
 # non-root account and a reduced filesystem view.
 NoNewPrivileges=yes
-CapabilityBoundingSet=
+# bubblewrap needs these capabilities inside its private user namespace to
+# mount the read-only root, /proc, /dev and /tmp. They are not ambient and the
+# service still has no effective capabilities in the host namespace.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_MKNOD CAP_DAC_OVERRIDE
 AmbientCapabilities=
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=full
 ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-RestrictNamespaces=yes
+# A fresh procfs mount inside bubblewrap's user namespace is refused when the
+# existing /proc has systemd's over-mounts. Keep the protections that do not
+# over-mount /proc; the per-action sandbox supplies its own procfs.
+ProtectKernelTunables=no
+ProtectKernelModules=no
+ProtectKernelLogs=no
+# The service creates a child cgroup per shell. systemd must delegate the
+# subtree, and the cgroup hierarchy must be writable for that delegation.
+Delegate=yes
+DelegateSubgroup=supervisor
+ProtectControlGroups=no
+ProtectClock=no
+ProtectHostname=no
+RestrictNamespaces=no
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes

@@ -168,6 +168,12 @@ export type SafetyRuntime = {
   file_size_bytes: number
   open_file_limit: number
   planner: string
+  runtime_mode: string
+  sandbox_mode: string
+  cgroup_memory_max_bytes: number
+  cgroup_pids_max: number
+  cgroup_cpu_quota_micros: number
+  cgroup_cpu_period_micros: number
   api_token_set: boolean
 }
 

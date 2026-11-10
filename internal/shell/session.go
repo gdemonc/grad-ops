@@ -27,6 +27,10 @@ var (
 	ErrBudgetExhausted = errors.New("shell call budget exhausted")
 	// ErrInvalidConfig means the session was configured with unusable values.
 	ErrInvalidConfig = errors.New("invalid shell configuration")
+	// ErrCleanupFailed means the shell's cgroup could not be killed or removed.
+	// The process may have outlived its turn, so callers must not treat the
+	// execution as fully contained.
+	ErrCleanupFailed = errors.New("shell cgroup cleanup failed")
 )
 
 // killGrace bounds how long a killed call may hold its output pipes open before
@@ -66,6 +70,12 @@ type Config struct {
 	// Prlimit is the absolute path of util-linux prlimit. It defaults to
 	// /usr/bin/prlimit when Limits is non-zero.
 	Prlimit string
+	// Cgroup, when enabled, starts the shell in a fresh cgroup v2 child with
+	// memory, process and CPU limits.
+	Cgroup CgroupConfig
+	// Sandbox, when enabled, runs the shell under bubblewrap with private
+	// namespaces and a read-only root.
+	Sandbox SandboxConfig
 }
 
 // Result is the outcome of one call.
@@ -135,6 +145,12 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("%w: scratch directory %q is not a directory", ErrInvalidConfig, cfg.ScratchDir)
 		}
 	}
+	if err := cfg.Cgroup.validate(); err != nil {
+		return err
+	}
+	if err := cfg.Sandbox.validate(); err != nil {
+		return err
+	}
 	for key := range cfg.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") {
 			return fmt.Errorf("%w: invalid environment key %q", ErrInvalidConfig, key)
@@ -166,7 +182,7 @@ func (s *Session) Remaining() int {
 // The script is passed to Bash as a single argument, so it is not word-split or
 // re-interpreted by the caller's shell. Its effects are bounded by the timeout,
 // the output caps and the process control the runtime installed.
-func (s *Session) Run(ctx context.Context, script string) (Result, error) {
+func (s *Session) Run(ctx context.Context, script string) (result Result, runErr error) {
 	if strings.TrimSpace(script) == "" {
 		return Result{}, fmt.Errorf("%w: script must not be empty", ErrInvalidConfig)
 	}
@@ -187,6 +203,17 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare shell: %w", err)
 	}
+	guard, err := newCgroupGuard(s.cfg.Cgroup)
+	if err != nil {
+		return Result{}, fmt.Errorf("prepare cgroup: %w", err)
+	}
+	var killErr error
+	defer func() {
+		runErr = errors.Join(runErr, killErr, guard.close())
+	}()
+	if err := guard.attach(command); err != nil {
+		return Result{}, fmt.Errorf("attach cgroup: %w", err)
+	}
 	stdout := newCappedBuffer(s.cfg.MaxOutputBytes)
 	stderr := newCappedBuffer(s.cfg.MaxOutputBytes)
 	command.Stdout = stdout
@@ -206,8 +233,9 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 	case waitErr = <-waited:
 	case <-callCtx.Done():
 		timedOut = true
-		// Kill the whole group, not just the shell: a script that backgrounded
-		// work must not outlive its turn.
+		// Kill the whole cgroup and process group: a script that backgrounded
+		// work, or escaped its process group, must not outlive its turn.
+		killErr = guard.kill()
 		killProcess(command)
 		select {
 		case waitErr = <-waited:
@@ -219,7 +247,7 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 		}
 	}
 
-	result := Result{
+	result = Result{
 		Script:          script,
 		Stdout:          stdout.String(),
 		Stderr:          stderr.String(),

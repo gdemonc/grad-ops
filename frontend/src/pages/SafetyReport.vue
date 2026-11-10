@@ -145,6 +145,22 @@ onMounted(() => {
               </span>
             </div>
             <div class="kv">
+              <span class="k">运行时模式</span>
+              <span class="v">
+                <a-tag :color="store.safetyReport.runtime.runtime_mode === 'cgroup-v2' ? 'green' : 'orange'" size="small">
+                  {{ store.safetyReport.runtime.runtime_mode === 'cgroup-v2' ? 'cgroup v2' : 'direct' }}
+                </a-tag>
+              </span>
+            </div>
+            <div class="kv">
+              <span class="k">沙箱</span>
+              <span class="v">
+                <a-tag :color="store.safetyReport.runtime.sandbox_mode === 'bubblewrap' ? 'green' : 'orange'" size="small">
+                  {{ store.safetyReport.runtime.sandbox_mode === 'bubblewrap' ? 'bubblewrap' : '未启用' }}
+                </a-tag>
+              </span>
+            </div>
+            <div class="kv">
               <span class="k">API 认证</span>
               <span class="v">
                 <a-tag :color="store.safetyReport.runtime.api_token_set ? 'green' : 'orange'" size="small">

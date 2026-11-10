@@ -82,7 +82,7 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 | `internal/api` | REST 接口与错误映射 |
 | `internal/e2e` | 贯穿真实组件的闭环测试 |
 
-尚未实现：规格中的 `linux`（systemd/cgroup 隔离原语）包。`internal/llm` 已提供 OpenAI 兼容客户端，`investigation.ModelPlanner` 提供两阶段模型计划；默认部署仍是 `StubPlanner`，`GRADOPS_PLANNER=model` 才启用模型。执行边界目前包括进程组、超时、输出上限、环境白名单、prlimit 资源限制，以及在配置 `GRADOPS_EXECUTOR_USER` 后的 uid/gid 切换；namespace、cgroup、文件系统与网络隔离仍未实现。`command` 已作为辅助分析包存在，但只校验探针/observe/验证命令的只读性，不是授权引擎。详见 [README 的当前实现状态](../README.md#当前实现状态)。
+当前 cgroup v2 与 bubblewrap 边界都在 `internal/shell` 中，尚未拆成单独的 `linux` 包。`internal/llm` 已提供 OpenAI 兼容客户端，`investigation.ModelPlanner` 提供两阶段模型计划；默认部署仍是 `StubPlanner`，`GRADOPS_PLANNER=model` 才启用模型。执行边界包括进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid/gid 切换、可选 per-action cgroup v2 和可选 bubblewrap 沙箱。`command` 已作为辅助分析包存在，但只校验探针/observe/验证命令的只读性，不是授权引擎。详见 [README 的当前实现状态](../README.md#当前实现状态)。
 
 ## 4. Linux Shell 与执行模型
 
@@ -108,7 +108,13 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 
 ### 4.4 Linux Runtime 是最终执行边界
 
-首期以 Linux 原生机制构建轻量 Runtime，而不是先引入完整容器编排平台：
+首期以 Linux 原生机制构建轻量 Runtime，而不是先引入完整容器编排平台。当前已实现可选的 cgroup v2 子 cgroup（内存/进程/CPU 限制）、systemd unit 的 `Delegate=yes`，以及可选的 bubblewrap 沙箱（独立 mount/PID/IPC/UTS/user/network namespace、只读根和可写根绑定）。真实 systemd delegated cgroup 上验证了内存/PID/CPU 限制和超时清理；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针验证，默认关闭但部署示例启用。
+
+隔离粒度必须按对象区分：
+
+- `Session`：每次 `Run` 创建一个新的子 cgroup；启用 sandbox 时也创建一个新的 bubblewrap 命名空间。Executor 的动作和验证使用这种 per-call 边界。
+- `Console`：`NewConsole` 只创建一次 Bash、cgroup 和 sandbox，之后同一调查上下文内的多次探针共享它们，直到 `Close`。开启 `GRADOPS_PROBE_CONSOLE=true` 时，一次调查的多条探针共享状态，因此**不是每条探针独立的 namespace**；Console 不会跨独立 Action 复用，Executor 也从不使用 Console。
+- 可写路径来自全局 `GRADOPS_ALLOWED_ROOTS`，不是按 Action 动态授权；网络只有“默认隔离”和 `GRADOPS_SANDBOX_NETWORK=true` 共享宿主两种模式，没有 IP/端口/DNS allowlist；路径绑定没有解决 symlink/TOCTOU。
 
 1. API/Agent 主服务使用专用非 root 账号；Shell 执行账号与主服务身份分离。
 2. 每个任务或操作会话使用独立的 systemd transient service/scope 或等效 cgroup，限制 CPU、内存、Tasks/PID、执行时间、文件大小和输出量。

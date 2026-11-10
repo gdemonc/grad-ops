@@ -139,6 +139,11 @@ type Config struct {
 	RunAs string
 	// Limits bounds each probe shell process.
 	Limits shell.Limits
+	// Cgroup is the optional cgroup v2 boundary for probe shells.
+	Cgroup shell.CgroupConfig
+	// Sandbox is the optional bubblewrap namespace/filesystem boundary for
+	// probe shells.
+	Sandbox shell.SandboxConfig
 	// TotalTimeout bounds one investigation across every probe and model call.
 	// Zero uses the default.
 	TotalTimeout time.Duration
@@ -352,14 +357,18 @@ type probeRunner interface {
 	Run(ctx context.Context, script string) (shell.Result, error)
 }
 
-func (s *Service) probe(ctx context.Context, probes []string) ([]evidence.Record, error) {
+func (s *Service) probe(ctx context.Context, probes []string) (records []evidence.Record, runErr error) {
 	runner, release, err := s.probeShell()
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer func() {
+		if closeErr := release(); closeErr != nil {
+			runErr = errors.Join(runErr, closeErr)
+		}
+	}()
 
-	records := make([]evidence.Record, 0, len(probes))
+	records = make([]evidence.Record, 0, len(probes))
 	for _, command := range probes {
 		result, err := runner.Run(ctx, command)
 		if err != nil {
@@ -678,7 +687,7 @@ func render(result shell.Result) string {
 // probeShell opens either a one-shot session or a persistent console. The
 // returned release function is never nil, so a console is closed even when a
 // probe fails.
-func (s *Service) probeShell() (probeRunner, func(), error) {
+func (s *Service) probeShell() (probeRunner, func() error, error) {
 	cfg := shell.Config{
 		Executable:     s.cfg.Bash,
 		WorkDir:        s.cfg.WorkDir,
@@ -689,19 +698,21 @@ func (s *Service) probeShell() (probeRunner, func(), error) {
 		ScratchDir:     s.cfg.ScratchDir,
 		RunAs:          s.cfg.RunAs,
 		Limits:         s.cfg.Limits,
+		Cgroup:         s.cfg.Cgroup,
+		Sandbox:        s.cfg.Sandbox,
 	}
 
 	if s.cfg.PersistentProbes {
 		console, err := shell.NewConsole(cfg)
 		if err != nil {
-			return nil, func() {}, fmt.Errorf("prepare investigation console: %w", err)
+			return nil, func() error { return nil }, fmt.Errorf("prepare investigation console: %w", err)
 		}
-		return console, func() { _ = console.Close() }, nil
+		return console, console.Close, nil
 	}
 
 	session, err := shell.NewSession(cfg)
 	if err != nil {
-		return nil, func() {}, fmt.Errorf("prepare investigation shell: %w", err)
+		return nil, func() error { return nil }, fmt.Errorf("prepare investigation shell: %w", err)
 	}
-	return session, func() {}, nil
+	return session, func() error { return nil }, nil
 }

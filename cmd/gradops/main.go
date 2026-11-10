@@ -58,14 +58,34 @@ func run() error {
 		return err
 	}
 
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	slog.SetDefault(logger)
+
 	// Refuse to start with a boundary this host cannot enforce. Validating here
 	// keeps the failure at startup instead of on the first investigation.
+	logger.Info("validating shell runtime")
 	if err := shell.ValidateRuntime(cfg.ExecutorUser, cfg.Limits, cfg.Prlimit); err != nil {
 		return fmt.Errorf("runtime configuration: %w", err)
 	}
-
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
-	slog.SetDefault(logger)
+	logger.Info("validating cgroup runtime", "mode", cfg.RuntimeMode)
+	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
+		return fmt.Errorf("cgroup runtime: %w", err)
+	}
+	sandbox := shell.SandboxConfig{
+		Enabled:       cfg.SandboxMode == "bubblewrap",
+		Bubblewrap:    cfg.Bubblewrap,
+		AllowNetwork:  cfg.SandboxNetwork,
+		WritablePaths: cfg.AllowedRoots,
+	}
+	logger.Info("validating sandbox runtime", "mode", cfg.SandboxMode)
+	if err := shell.ValidateSandbox(sandbox); err != nil {
+		return fmt.Errorf("sandbox runtime: %w", err)
+	}
+	logger.Info("runtime boundary validated",
+		"runtime", cfg.RuntimeMode,
+		"sandbox", cfg.SandboxMode,
+		"executor_user", cfg.ExecutorUser,
+	)
 
 	// SIGINT and SIGTERM both mean "stop accepting work and drain".
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -132,6 +152,8 @@ func run() error {
 		RequireRunAsMatch: cfg.RequireRunAsMatch,
 		RunAs:             cfg.ExecutorUser,
 		Limits:            cfg.Limits,
+		Cgroup:            cfg.Cgroup,
+		Sandbox:           sandbox,
 		ExecutionTimeout:  cfg.ExecutionTimeout,
 	}, executor.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
@@ -144,6 +166,8 @@ func run() error {
 		Timeout: cfg.ProbeTimeout,
 		RunAs:   cfg.ExecutorUser,
 		Limits:  cfg.Limits,
+		Cgroup:  cfg.Cgroup,
+		Sandbox: sandbox,
 	}, verify.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
 		return fmt.Errorf("build verifier: %w", err)
@@ -169,6 +193,8 @@ func run() error {
 			TotalTimeout:     cfg.InvestigationTimeout,
 			RunAs:            cfg.ExecutorUser,
 			Limits:           cfg.Limits,
+			Cgroup:           cfg.Cgroup,
+			Sandbox:          sandbox,
 		})
 	if err != nil {
 		return fmt.Errorf("build investigation: %w", err)
@@ -203,23 +229,29 @@ func run() error {
 		MaxRequestBytes: cfg.MaxRequestBytes,
 		APIToken:        cfg.APIToken,
 		Runtime: api.RuntimeInfo{
-			Bash:              cfg.Bash,
-			WorkDir:           cfg.WorkDir,
-			ContractWorkDir:   cfg.ContractWorkDir,
-			AllowedRoots:      cfg.AllowedRoots,
-			PolicyVersion:     cfg.PolicyVersion,
-			ApprovalTTLMS:     cfg.ApprovalTTL.Milliseconds(),
-			WorkerEnabled:     cfg.EnableWorker,
-			RequireRunAsMatch: cfg.RequireRunAsMatch,
-			PersistentProbes:  cfg.PersistentProbes,
-			ExecutorUser:      cfg.ExecutorUser,
-			CPULimitMS:        cfg.Limits.CPU.Milliseconds(),
-			AddressSpaceBytes: cfg.Limits.AddressSpaceBytes,
-			ProcessLimit:      cfg.Limits.MaxProcesses,
-			FileSizeBytes:     cfg.Limits.MaxFileSizeBytes,
-			OpenFileLimit:     cfg.Limits.MaxOpenFiles,
-			Planner:           cfg.Planner,
-			APITokenSet:       cfg.APIToken != "",
+			Bash:                  cfg.Bash,
+			WorkDir:               cfg.WorkDir,
+			ContractWorkDir:       cfg.ContractWorkDir,
+			AllowedRoots:          cfg.AllowedRoots,
+			PolicyVersion:         cfg.PolicyVersion,
+			ApprovalTTLMS:         cfg.ApprovalTTL.Milliseconds(),
+			WorkerEnabled:         cfg.EnableWorker,
+			RequireRunAsMatch:     cfg.RequireRunAsMatch,
+			PersistentProbes:      cfg.PersistentProbes,
+			ExecutorUser:          cfg.ExecutorUser,
+			CPULimitMS:            cfg.Limits.CPU.Milliseconds(),
+			AddressSpaceBytes:     cfg.Limits.AddressSpaceBytes,
+			ProcessLimit:          cfg.Limits.MaxProcesses,
+			FileSizeBytes:         cfg.Limits.MaxFileSizeBytes,
+			OpenFileLimit:         cfg.Limits.MaxOpenFiles,
+			Planner:               cfg.Planner,
+			RuntimeMode:           cfg.RuntimeMode,
+			CgroupMemoryMaxBytes:  cfg.Cgroup.MemoryMaxBytes,
+			CgroupPidsMax:         cfg.Cgroup.PidsMax,
+			CgroupCPUQuotaMicros:  cfg.Cgroup.CPUQuotaMicros,
+			CgroupCPUPeriodMicros: cfg.Cgroup.CPUPeriodMicros,
+			SandboxMode:           cfg.SandboxMode,
+			APITokenSet:           cfg.APIToken != "",
 		},
 	})
 
