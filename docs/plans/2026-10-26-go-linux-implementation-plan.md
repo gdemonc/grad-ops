@@ -28,7 +28,7 @@
 - [x] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
 - [x] 状态机函数与状态迁移单测。
 - [x] Worker 任务认领、租约、超时和恢复策略；按任务生命周期设计处理 UNKNOWN，禁止不确定副作用自动重放。
-- [x] Linux CI 执行 `go test ./...`、`go vet ./...`、`go test -race ./...`，并单独验证最低 Go 1.26.0（GitHub Actions `Linux CI` [run #5](https://github.com/gdemonc/grad-ops/actions/runs/42763868185) 通过）。
+- [x] Linux CI 执行 `go test ./...`、`go vet ./...`、`go test -race ./...`，并单独验证最低 Go 1.26.0（GitHub Actions `Linux CI` [Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml) 通过）。
 
 **验收：** 空项目可在 Ubuntu 启动；创建任务、持久化、重启恢复与审计写入均有集成测试；任务时间线可回看关键步骤及其来源。
 
@@ -114,7 +114,7 @@ Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.m
 
 ## 完成定义
 
-- [x] Go 代码可构建，测试在 Linux CI 通过（GitHub Actions `Linux CI` [run #5](https://github.com/gdemonc/grad-ops/actions/runs/42763868185) 通过；同时保留 Ubuntu 26.04.1 本地结果）。
+- [x] Go 代码可构建，测试在 Linux CI 通过（GitHub Actions `Linux CI` [Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml) 通过；同时保留 Ubuntu 26.04.1 本地结果）。
 - [x] 无 Windows 适配代码或 Windows 专属启动步骤（`control_other.go`、`runtime_other.go`、`demo.ps1`、`run_dev.ps1` 已删除）。
 - [x] 所有副作用通过唯一 Executor 和确定性策略。
 - [x] 关键安全属性均有自动化测试，不只依赖文档承诺。

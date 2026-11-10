@@ -88,9 +88,12 @@ fresh child cgroup for each shell and writes `memory.max`, `pids.max` and,
 when configured, `cpu.max`. The child is placed in that cgroup at clone time
 with `CLONE_INTO_CGROUP`, so it does not run outside the boundary first.
 
-This requires systemd cgroup delegation: the unit sets `Delegate=yes`. For that
-reason `ProtectControlGroups=no` is used; it is a deliberate tradeoff in exchange
-for writable per-action cgroups. If the delegated subtree is not writable,
+This requires systemd cgroup delegation: the unit sets `Delegate=yes` and moves
+its own process into `DelegateSubgroup=supervisor`, leaving the delegated base
+empty so controllers can be enabled. The application discovers its base from
+`/proc/self/cgroup` and strips the `supervisor` subgroup. For that reason
+`ProtectControlGroups=no` is used; it is a deliberate tradeoff in exchange for
+writable per-action cgroups. If the delegated subtree is not writable,
 startup fails instead of falling back to `direct`.
 
 The integration test for a real delegated cgroup skips when the host's cgroup

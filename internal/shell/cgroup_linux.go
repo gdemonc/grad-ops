@@ -266,7 +266,14 @@ func cgroupV2Path(proc string) (string, error) {
 		if !strings.HasPrefix(fields[2], "/") {
 			return "", fmt.Errorf("unusable cgroup v2 path %q", fields[2])
 		}
-		return strings.TrimPrefix(fields[2], "/"), nil
+		path := strings.TrimSuffix(strings.TrimPrefix(fields[2], "/"), "/")
+		// The unit uses DelegateSubgroup=supervisor so the service's own PID is
+		// outside the delegated base cgroup; child cgroups belong to the base.
+		if path == "supervisor" {
+			return "", nil
+		}
+		path = strings.TrimSuffix(path, "/supervisor")
+		return path, nil
 	}
 	return "", fmt.Errorf("no cgroup v2 entry in /proc/self/cgroup")
 }
