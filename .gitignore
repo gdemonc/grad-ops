@@ -19,3 +19,6 @@ frontend/dist/
 # Local Go caches used by the sandboxed development environment
 /.gocache/
 /.gopath/
+
+# Local deployment key generated for this sandbox
+/.ssh/
