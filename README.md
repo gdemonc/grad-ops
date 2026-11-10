@@ -88,14 +88,14 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
 | Linux 隔离（namespace、cgroup、systemd、文件系统、网络） | **未实现**：目前有进程组、超时、输出上限、环境白名单、资源限制和可选的 uid 切换 |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
-| Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0 |
+| Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0（[run #5](https://github.com/gdemonc/grad-ops/actions/runs/42763868185)） |
 | systemd 部署 | 已提供 hardened unit、环境文件示例、安装脚本和静态检查；`systemd-analyze verify` 通过，尚未在真实 systemd 主机完成安装运行 |
 
 ### 已验证 / 未验证
 
 - **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）。
 - **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、namespace、cgroup、systemd 单元、真实 `/var/log` 路径下的文件边界、文件系统/网络隔离。这些不能因为测试套件全绿而被视为已实现。
-- **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证。
+- **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证（[run #5](https://github.com/gdemonc/grad-ops/actions/runs/42763868185)）。
 - 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用此前的开发机结果，本次未重跑。
 
 ### 一条任务会经历什么

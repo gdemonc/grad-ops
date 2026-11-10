@@ -2,7 +2,7 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job，`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、183 个 `Test` 函数；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[run #5](https://github.com/gdemonc/grad-ops/actions/runs/42763868185)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、183 个 `Test` 函数；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
 
 ## 如何运行
 
