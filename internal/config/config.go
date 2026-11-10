@@ -44,6 +44,9 @@ const (
 	envCgroupPids      = "GRADOPS_CGROUP_PIDS_MAX"
 	envCgroupCPUQuota  = "GRADOPS_CGROUP_CPU_QUOTA_MICROS"
 	envCgroupCPUPeriod = "GRADOPS_CGROUP_CPU_PERIOD_MICROS"
+	envSandbox         = "GRADOPS_SANDBOX"
+	envBubblewrap      = "GRADOPS_BWRAP"
+	envSandboxNetwork  = "GRADOPS_SANDBOX_NETWORK"
 	envAPIToken        = "GRADOPS_API_TOKEN"
 	envExecutorUser    = "GRADOPS_EXECUTOR_USER"
 	envPrlimit         = "GRADOPS_PRLIMIT"
@@ -76,6 +79,8 @@ const (
 	defaultCgroupMemory  = 512 << 20
 	defaultCgroupPids    = 256
 	defaultCgroupPeriod  = 100_000
+	defaultSandbox       = "none"
+	defaultBubblewrap    = "/usr/bin/bwrap"
 	defaultMaxOutput     = 64 << 10
 	defaultPrlimit       = "/usr/bin/prlimit"
 	maxBodyLimit         = 8 << 20
@@ -154,6 +159,12 @@ type Config struct {
 	RuntimeMode string
 	// Cgroup configures the cgroup v2 boundary when RuntimeMode is cgroup-v2.
 	Cgroup shell.CgroupConfig
+	// SandboxMode selects none or bubblewrap.
+	SandboxMode string
+	// Bubblewrap is the absolute path of the bubblewrap binary.
+	Bubblewrap string
+	// SandboxNetwork keeps the host network namespace when true.
+	SandboxNetwork bool
 	// ExecutorUser is the Linux identity that probes, actions and verification
 	// run as. Empty keeps the service identity; otherwise every shell must
 	// actually assume this identity or startup fails.
@@ -205,6 +216,8 @@ func Load() (Config, error) {
 			PidsMax:         defaultCgroupPids,
 			CPUPeriodMicros: defaultCgroupPeriod,
 		},
+		SandboxMode:    strings.ToLower(getenv(envSandbox, defaultSandbox)),
+		Bubblewrap:     getenv(envBubblewrap, defaultBubblewrap),
 		MaxOutputBytes: defaultMaxOutput,
 		EnableWorker:   true,
 		ExecutorUser:   getenv(envExecutorUser, ""),
@@ -318,6 +331,22 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s must be a duration between 1ns and 24h", envExecution)
 		}
 		cfg.ExecutionTimeout = timeout
+	}
+
+	switch cfg.SandboxMode {
+	case "none", "bubblewrap":
+	default:
+		return Config{}, fmt.Errorf("%s must be none or bubblewrap", envSandbox)
+	}
+	if raw := strings.TrimSpace(os.Getenv(envSandboxNetwork)); raw != "" {
+		value, err := parseBool(envSandboxNetwork, raw)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.SandboxNetwork = value
+	}
+	if cfg.SandboxMode == "bubblewrap" && !filepath.IsAbs(cfg.Bubblewrap) {
+		return Config{}, fmt.Errorf("%s must be an absolute path", envBubblewrap)
 	}
 
 	switch cfg.RuntimeMode {

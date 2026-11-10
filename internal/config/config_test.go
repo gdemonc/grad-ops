@@ -278,3 +278,37 @@ func TestCgroupLimitsRejectNegativeValues(t *testing.T) {
 		t.Fatal("expected a negative cgroup limit to be rejected")
 	}
 }
+
+func TestSandboxDefaultsToNoneAndParsesOptions(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.SandboxMode != "none" || cfg.SandboxNetwork {
+		t.Fatalf("sandbox mode = %q network = %t", cfg.SandboxMode, cfg.SandboxNetwork)
+	}
+
+	cfg, err = loadWith(t, map[string]string{
+		"GRADOPS_SANDBOX":         "bubblewrap",
+		"GRADOPS_BWRAP":           "/usr/bin/bwrap",
+		"GRADOPS_SANDBOX_NETWORK": "true",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.SandboxMode != "bubblewrap" || !cfg.SandboxNetwork {
+		t.Fatalf("sandbox mode = %q network = %t", cfg.SandboxMode, cfg.SandboxNetwork)
+	}
+}
+
+func TestSandboxRejectsUnknownModeAndRelativeBinary(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{"GRADOPS_SANDBOX": "namespace"}); err == nil {
+		t.Fatal("expected an unknown sandbox mode to be rejected")
+	}
+	if _, err := loadWith(t, map[string]string{
+		"GRADOPS_SANDBOX": "bubblewrap",
+		"GRADOPS_BWRAP":   "bwrap",
+	}); err == nil {
+		t.Fatal("expected a relative bubblewrap path to be rejected")
+	}
+}

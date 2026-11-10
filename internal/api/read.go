@@ -41,6 +41,8 @@ type RuntimeInfo struct {
 	Planner string `json:"planner"`
 	// RuntimeMode is direct or cgroup-v2.
 	RuntimeMode string `json:"runtime_mode"`
+	// SandboxMode is none or bubblewrap.
+	SandboxMode string `json:"sandbox_mode"`
 	// Cgroup limits, when RuntimeMode is cgroup-v2.
 	CgroupMemoryMaxBytes  int64 `json:"cgroup_memory_max_bytes"`
 	CgroupPidsMax         int64 `json:"cgroup_pids_max"`
@@ -363,6 +365,8 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 			Detail: "动作声明的路径必须落在允许根目录内：" + strings.Join(info.AllowedRoots, ", ")},
 		{Key: "identity", Name: "运行身份", Status: identityStatus(info),
 			Detail: identityDetail(info)},
+		{Key: "sandbox", Name: "文件系统/命名空间沙箱", Status: sandboxStatus(info),
+			Detail: sandboxDetail(info)},
 		{Key: "isolation", Name: "运行时隔离", Status: "warn",
 			Detail: isolationDetail(info)},
 		{Key: "audit", Name: "审计链", Status: "ok",
@@ -450,6 +454,20 @@ func identityDetail(info RuntimeInfo) string {
 		return "已开启强制校验：契约的 run_as 必须等于当前进程身份，否则拒绝执行"
 	}
 	return "未配置 GRADOPS_EXECUTOR_USER：脚本以服务进程身份运行，契约声明的身份不会被实际切换"
+}
+
+func sandboxStatus(info RuntimeInfo) string {
+	if info.SandboxMode == "bubblewrap" {
+		return "ok"
+	}
+	return "warn"
+}
+
+func sandboxDetail(info RuntimeInfo) string {
+	if info.SandboxMode == "bubblewrap" {
+		return "bubblewrap：独立 mount/PID/IPC/UTS/user 命名空间，只读根，可写路径按策略绑定；网络默认隔离"
+	}
+	return "未启用 GRADOPS_SANDBOX：没有 namespace、文件系统或网络隔离"
 }
 
 func isolationDetail(info RuntimeInfo) string {

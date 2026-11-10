@@ -114,8 +114,43 @@ timeout killed the cgroup, and no `gradops-*` child cgroup was left behind.
 The same host was then restarted with `GRADOPS_CGROUP_CPU_QUOTA_MICROS=50000`
 and `cpu.max=50000 100000` passed; the controller list included `cpu`.
 
-The unit still does not add a network or mount namespace and does not make
-`/var/log` read-only. Those remain open work.
+## Bubblewrap sandbox
+
+`gradops.env.example` also enables:
+
+```bash
+GRADOPS_SANDBOX=bubblewrap
+GRADOPS_BWRAP=/usr/bin/bwrap
+GRADOPS_SANDBOX_NETWORK=false
+```
+
+Each shell then gets private mount/PID/IPC/UTS/user and network namespaces, a
+read-only root, a writable `/tmp`, and read-write bind mounts only for
+`GRADOPS_ALLOWED_ROOTS` and the console scratch directory. The network is
+loopback-only unless `GRADOPS_SANDBOX_NETWORK=true`.
+
+Because bubblewrap creates namespaces, the unit must not block them:
+
+```ini
+RestrictNamespaces=no
+```
+
+This is a deliberate tradeoff: `/var/log` write access remains available to
+the shell after policy approval, but the root and the rest of the host
+filesystem are read-only inside the sandbox.
+
+The app probes bubblewrap at startup and refuses to start if the sandbox cannot
+be created. Verify an installed host with:
+
+```bash
+sudo systemctl show gradops -p RestrictNamespaces
+sudo grep -E '^GRADOPS_SANDBOX|^GRADOPS_BWRAP|^GRADOPS_SANDBOX_NETWORK' /etc/gradops/gradops.env
+sudo /usr/local/go/bin/go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoot -v
+```
+
+The service-level unit still does not make `/var/log` read-only; the bubblewrap
+sandbox is the per-shell filesystem boundary. Namespace/network behavior has
+not yet been tested from inside the installed systemd service.
 
 ## Verify
 

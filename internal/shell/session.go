@@ -69,6 +69,9 @@ type Config struct {
 	// Cgroup, when enabled, starts the shell in a fresh cgroup v2 child with
 	// memory, process and CPU limits.
 	Cgroup CgroupConfig
+	// Sandbox, when enabled, runs the shell under bubblewrap with private
+	// namespaces and a read-only root.
+	Sandbox SandboxConfig
 }
 
 // Result is the outcome of one call.
@@ -139,6 +142,9 @@ func validateConfig(cfg Config) error {
 		}
 	}
 	if err := cfg.Cgroup.validate(); err != nil {
+		return err
+	}
+	if err := cfg.Sandbox.validate(); err != nil {
 		return err
 	}
 	for key := range cfg.Env {

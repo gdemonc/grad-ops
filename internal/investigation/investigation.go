@@ -141,6 +141,9 @@ type Config struct {
 	Limits shell.Limits
 	// Cgroup is the optional cgroup v2 boundary for probe shells.
 	Cgroup shell.CgroupConfig
+	// Sandbox is the optional bubblewrap namespace/filesystem boundary for
+	// probe shells.
+	Sandbox shell.SandboxConfig
 	// TotalTimeout bounds one investigation across every probe and model call.
 	// Zero uses the default.
 	TotalTimeout time.Duration
@@ -692,6 +695,7 @@ func (s *Service) probeShell() (probeRunner, func(), error) {
 		RunAs:          s.cfg.RunAs,
 		Limits:         s.cfg.Limits,
 		Cgroup:         s.cfg.Cgroup,
+		Sandbox:        s.cfg.Sandbox,
 	}
 
 	if s.cfg.PersistentProbes {

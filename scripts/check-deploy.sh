@@ -29,7 +29,7 @@ for directive in \
   'Delegate=yes' \
   'DelegateSubgroup=supervisor' \
   'ProtectControlGroups=no' \
-  'RestrictNamespaces=yes' \
+  'RestrictNamespaces=no' \
   'RestrictSUIDSGID=yes' \
   'KillMode=control-group' \
   'MemoryMax=' \
@@ -47,6 +47,7 @@ fi
 grep -q 'GRADOPS_API_TOKEN=' "$ENV_FILE" || fail "environment example lacks the API token"
 grep -q 'GRADOPS_ADDR=127.0.0.1' "$ENV_FILE" || fail "environment example should default to loopback"
 grep -q 'GRADOPS_RUNTIME=cgroup-v2' "$ENV_FILE" || fail "environment example should enable cgroup runtime"
+grep -q 'GRADOPS_SANDBOX=bubblewrap' "$ENV_FILE" || fail "environment example should enable bubblewrap"
 grep -q 'GRADOPS_DB_PATH=/var/lib/gradops/' "$ENV_FILE" || fail "database should live in StateDirectory"
 
 bash -n "$INSTALL"

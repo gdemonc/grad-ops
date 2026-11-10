@@ -169,6 +169,7 @@ export type SafetyRuntime = {
   open_file_limit: number
   planner: string
   runtime_mode: string
+  sandbox_mode: string
   cgroup_memory_max_bytes: number
   cgroup_pids_max: number
   cgroup_cpu_quota_micros: number

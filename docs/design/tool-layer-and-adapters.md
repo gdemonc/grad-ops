@@ -149,7 +149,7 @@ R0-R4 风险等级继续保留为决策结果：
 - Shell Session 不继承主服务秘密，不持有任意 sudo/root 权限。
 - Policy 对主体、目标资源、副作用和风险作确定性判断；模型自报风险不能改变决策。
 - AST 可提供结构化展示与风险提示，但不作为唯一安全边界。（当前已实现写操作/间接执行/动态命令名的辅助分析，并用于探针、`observe` 动作与验证命令的只读性校验；尚未实现完整的命令结构展示。）
-- systemd/cgroup 等 Runtime 限制时间、CPU、内存、PID、输出和进程回收；实际生效配置有集成测试。（当前实现 prlimit 的 CPU/地址空间/进程数/文件大小/fd 限制、可选 uid 切换，以及可选 per-action cgroup v2 的内存/PID/CPU 限制；systemd transient scope、namespace、文件系统/网络隔离仍未实现；per-action cgroup 内存/PID/CPU 与超时清理已在真实 systemd delegated cgroup 上验证）
+- systemd/cgroup 等 Runtime 限制时间、CPU、内存、PID、输出和进程回收；实际生效配置有集成测试。（当前实现 prlimit 的 CPU/地址空间/进程数/文件大小/fd 限制、可选 uid 切换，以及可选 per-action cgroup v2 的内存/PID/CPU 限制；systemd transient scope、namespace、文件系统/网络隔离仍未实现；per-action cgroup 内存/PID/CPU 与超时清理已在真实 systemd delegated cgroup 上验证；bubblewrap 命名空间/文件系统/网络沙箱已实现但尚未在真实 systemd 服务验证）
 - 文件和网络访问按调查/操作场景施加边界；越界操作被阻断。
 - 高权限操作通过独立、窄接口的 privileged broker/helper，不通过任意 sudo。
 - Action Contract 绑定脚本、目标、身份、预算和 Runtime 配置；关键字段变化触发重新评估。

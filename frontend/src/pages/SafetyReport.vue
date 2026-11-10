@@ -153,6 +153,14 @@ onMounted(() => {
               </span>
             </div>
             <div class="kv">
+              <span class="k">沙箱</span>
+              <span class="v">
+                <a-tag :color="store.safetyReport.runtime.sandbox_mode === 'bubblewrap' ? 'green' : 'orange'" size="small">
+                  {{ store.safetyReport.runtime.sandbox_mode === 'bubblewrap' ? 'bubblewrap' : '未启用' }}
+                </a-tag>
+              </span>
+            </div>
+            <div class="kv">
               <span class="k">API 认证</span>
               <span class="v">
                 <a-tag :color="store.safetyReport.runtime.api_token_set ? 'green' : 'orange'" size="small">

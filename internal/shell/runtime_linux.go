@@ -63,14 +63,25 @@ func newShellCommand(cfg Config, args ...string) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("%w: resource limits and prlimit must be configured together", ErrInvalidConfig)
 	}
 
-	var command *exec.Cmd
-	if cfg.Prlimit == "" {
-		command = exec.Command(cfg.Executable, args...)
-	} else {
+	executable := cfg.Executable
+	commandArgs := args
+	if cfg.Prlimit != "" {
 		limitArgs := cfg.Limits.args()
 		limitArgs = append(limitArgs, "--", cfg.Executable)
 		limitArgs = append(limitArgs, args...)
-		command = exec.Command(cfg.Prlimit, limitArgs...)
+		executable = cfg.Prlimit
+		commandArgs = limitArgs
+	}
+
+	var command *exec.Cmd
+	if cfg.Sandbox.Enabled {
+		sandboxed, err := sandboxArgs(cfg, executable, commandArgs)
+		if err != nil {
+			return nil, err
+		}
+		command = exec.Command(cfg.Sandbox.Bubblewrap, sandboxed...)
+	} else {
+		command = exec.Command(executable, commandArgs...)
 	}
 
 	command.Dir = cfg.WorkDir

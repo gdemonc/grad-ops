@@ -115,6 +115,7 @@ type Service struct {
 	limits           shell.Limits
 	executionTimeout time.Duration
 	cgroup           shell.CgroupConfig
+	sandbox          shell.SandboxConfig
 }
 
 // Config is the executor's fixed configuration.
@@ -139,6 +140,8 @@ type Config struct {
 	ExecutionTimeout time.Duration
 	// Cgroup is the optional cgroup v2 boundary for the action shell.
 	Cgroup shell.CgroupConfig
+	// Sandbox is the optional bubblewrap namespace/filesystem boundary.
+	Sandbox shell.SandboxConfig
 }
 
 // New builds a service.
@@ -164,6 +167,7 @@ func New(db *store.DB, engine *policy.Engine, approvals *approval.Service, ev *e
 		limits:            cfg.Limits,
 		executionTimeout:  cfg.ExecutionTimeout,
 		cgroup:            cfg.Cgroup,
+		sandbox:           cfg.Sandbox,
 	}
 	if service.executionTimeout <= 0 {
 		service.executionTimeout = 2 * time.Minute
@@ -604,6 +608,7 @@ func (s *Service) session(c contract.Contract) (*shell.Session, error) {
 		RunAs:          s.runAs,
 		Limits:         s.limits,
 		Cgroup:         s.cgroup,
+		Sandbox:        s.sandbox,
 	})
 }
 

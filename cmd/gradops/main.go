@@ -66,6 +66,15 @@ func run() error {
 	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
 		return fmt.Errorf("cgroup runtime: %w", err)
 	}
+	sandbox := shell.SandboxConfig{
+		Enabled:       cfg.SandboxMode == "bubblewrap",
+		Bubblewrap:    cfg.Bubblewrap,
+		AllowNetwork:  cfg.SandboxNetwork,
+		WritablePaths: cfg.AllowedRoots,
+	}
+	if err := shell.ValidateSandbox(sandbox); err != nil {
+		return fmt.Errorf("sandbox runtime: %w", err)
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
@@ -136,6 +145,7 @@ func run() error {
 		RunAs:             cfg.ExecutorUser,
 		Limits:            cfg.Limits,
 		Cgroup:            cfg.Cgroup,
+		Sandbox:           sandbox,
 		ExecutionTimeout:  cfg.ExecutionTimeout,
 	}, executor.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
@@ -149,6 +159,7 @@ func run() error {
 		RunAs:   cfg.ExecutorUser,
 		Limits:  cfg.Limits,
 		Cgroup:  cfg.Cgroup,
+		Sandbox: sandbox,
 	}, verify.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
 		return fmt.Errorf("build verifier: %w", err)
@@ -175,6 +186,7 @@ func run() error {
 			RunAs:            cfg.ExecutorUser,
 			Limits:           cfg.Limits,
 			Cgroup:           cfg.Cgroup,
+			Sandbox:          sandbox,
 		})
 	if err != nil {
 		return fmt.Errorf("build investigation: %w", err)
@@ -230,6 +242,7 @@ func run() error {
 			CgroupPidsMax:         cfg.Cgroup.PidsMax,
 			CgroupCPUQuotaMicros:  cfg.Cgroup.CPUQuotaMicros,
 			CgroupCPUPeriodMicros: cfg.Cgroup.CPUPeriodMicros,
+			SandboxMode:           cfg.SandboxMode,
 			APITokenSet:           cfg.APIToken != "",
 		},
 	})
