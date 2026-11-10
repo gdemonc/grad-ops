@@ -88,14 +88,15 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
 | Linux 隔离（namespace、cgroup、systemd、文件系统、网络） | **未实现**：目前有进程组、超时、输出上限、环境白名单、资源限制和可选的 uid 切换 |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
+| Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0 |
 | systemd 部署 | 已提供 hardened unit、环境文件示例、安装脚本和静态检查；`systemd-analyze verify` 通过，尚未在真实 systemd 主机完成安装运行 |
 
 ### 已验证 / 未验证
 
 - **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）。
 - **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、namespace、cgroup、systemd 单元、真实 `/var/log` 路径下的文件边界、文件系统/网络隔离。这些不能因为测试套件全绿而被视为已实现。
-- **未验证**：Linux CI。当前结果来自一台开发机上的本地运行，不是 CI 产物；`-race` 仍未启用。
-- 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用之前的 Windows 结果，本次未重跑。
+- **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证。
+- 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用此前的开发机结果，本次未重跑。
 
 ### 一条任务会经历什么
 
@@ -220,7 +221,7 @@ sudo deploy/install.sh ./bin/gradops
 | `GET` | `/api/safety` | 运行边界与防护闸门（未实现项标注为 warn） |
 | `GET` | `/api/audit/verify` | 审计链校验 |
 
-最小冒烟（只读闭环）：启动后创建任务，worker 会自动调查并封存；随后读取证据与时间线。已实现的 Go 测试在 Linux CI 通过之前，不应被当作 Linux 环境下的验证结果。
+最小冒烟（只读闭环）：启动后创建任务，worker 会自动调查并封存；随后读取证据与时间线。Linux CI 与本地 Ubuntu 结果均可在 Actions / `docs/testing.md` 追溯。
 
 ### 控制台
 
@@ -236,8 +237,7 @@ npm run dev       # 默认把 /api 代理到 127.0.0.1:8080
 ### 端到端演示
 
 ```bash
-bash scripts/demo.sh                 # 目标平台：构建 → 启动 → 建任务 → 等待封存 → 打印证据、时间线与审计校验
-pwsh scripts/demo.ps1 -Addr 127.0.0.1:18080   # 开发机：Git Bash 作为 shell
+bash scripts/demo.sh                 # 构建 → 启动 → 建任务 → 等待封存 → 打印证据、时间线与审计校验
 ```
 
 两个脚本都会在任务没有到达 `SEALED` 或审计链校验失败时以非零码退出，所以它是一次冒烟测试，而不是"总会成功"的演示。设置 `GRADOPS_API_TOKEN` 时，两个脚本会自动把同一个 token 作为 Bearer 头发给 API。开发机上要显式给出 `GRADOPS_BASH`（Git Bash 的绝对路径）与 `GRADOPS_WORK_DIR`。

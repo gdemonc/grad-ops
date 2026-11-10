@@ -11,11 +11,6 @@ import (
 // so configuration fails closed instead.
 var ErrIdentityUnavailable = errors.New("requested identity cannot be assumed")
 
-// ErrRuntimeUnsupported means a runtime restriction was requested on a platform
-// that does not implement it. The product targets Linux; this exists so a
-// development host cannot pretend the restriction happened.
-var ErrRuntimeUnsupported = errors.New("runtime restriction is not supported on this platform")
-
 // Limits are the Linux resource limits applied to every shell process.
 //
 // A zero field means "leave this limit as the service inherited it". Limits are

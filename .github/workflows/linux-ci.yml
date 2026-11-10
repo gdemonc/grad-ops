@@ -51,3 +51,33 @@ jobs:
 
       - name: Race test
         run: go test -race ./... -count=1
+
+  minimum:
+    name: Minimum Go (1.26.0)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Show toolchain
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1

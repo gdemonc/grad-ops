@@ -13,7 +13,7 @@
 - [x] 评审敏感数据与日志安全要求：`docs/design/data-security-and-logging.md`。
 - [x] 定义规范化 JSON 和 SHA-256 摘要测试向量（`internal/contract` 的固定向量与跨进程重算测试）。
 - [x] 定义 API request/response DTO 与数据库迁移策略（嵌入式版本化迁移 + 各包内 DTO）。
-- [x] 清理与首期 Linux-only 目标冲突的 Windows/PowerShell/跨平台要求（旧核心闭环规格已标注归档；`internal/shell/control_other.go` 仅为开发机验证存根，不属于支持平台）。
+- [x] 清理与首期 Linux-only 目标冲突的 Windows/PowerShell/跨平台要求（旧核心闭环规格已标注归档；非 Linux 的 shell 存根与 PowerShell 脚本已删除）。
 
 **验收：** 文档明确 Go Greenfield 实现与 Linux-only 边界；Python 不构成功能兼容或架构迁移要求；每个首期需求都有测试验收条件。
 
@@ -28,7 +28,7 @@
 - [x] 完整持久化 Task History：请求、状态迁移、工具调用元数据、Evidence 引用、审批、执行、验证和审计事件。
 - [x] 状态机函数与状态迁移单测。
 - [x] Worker 任务认领、租约、超时和恢复策略；按任务生命周期设计处理 UNKNOWN，禁止不确定副作用自动重放。
-- [ ] Linux CI 执行 `go test ./...`、`go vet ./...`（Ubuntu 26.04.1 本机已通过，含 `-race`；尚未接入 CI）。
+- [x] Linux CI 执行 `go test ./...`、`go vet ./...`、`go test -race ./...`，并单独验证最低 Go 1.26.0（GitHub Actions `Linux CI` 通过）。
 
 **验收：** 空项目可在 Ubuntu 启动；创建任务、持久化、重启恢复与审计写入均有集成测试；任务时间线可回看关键步骤及其来源。
 
@@ -114,8 +114,8 @@ Memory/Knowledge 的边界和数据设计见 `docs/design/memory-and-knowledge.m
 
 ## 完成定义
 
-- [ ] Go 代码可构建，测试在 Linux CI 通过（Ubuntu 26.04.1 本机构建、测试与 `-race` 通过；Linux CI 尚无结果）。
-- [ ] 无 Windows 适配代码或 Windows 专属启动步骤（`internal/shell/control_other.go` 是开发机存根，需在 Linux CI 落地后删除）。
+- [x] Go 代码可构建，测试在 Linux CI 通过（GitHub Actions `Linux CI` 通过；同时保留 Ubuntu 26.04.1 本地结果）。
+- [x] 无 Windows 适配代码或 Windows 专属启动步骤（`control_other.go`、`runtime_other.go`、`demo.ps1`、`run_dev.ps1` 已删除）。
 - [x] 所有副作用通过唯一 Executor 和确定性策略。
 - [x] 关键安全属性均有自动化测试，不只依赖文档承诺。
 - [x] README、架构、规格、威胁模型、测试报告与实际实现一致（README 与实施计划已对齐；`docs/architecture.md` 仍描述目标布局而非当前包清单，差距记录在此）。
