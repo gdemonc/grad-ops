@@ -158,7 +158,7 @@ func TestCgroupMemoryLimitIsEnforced(t *testing.T) {
 		t.Fatalf("new session: %v", err)
 	}
 	result, err := session.Run(context.Background(),
-		`path=$(cut -d: -f3 /proc/self/cgroup); echo 0 > "/sys/fs/cgroup$path/memory.swap.max" 2>/dev/null || true; x=$(head -c 67108864 /dev/zero | tr '\0' x)`)
+		`path=$(cut -d: -f3 /proc/self/cgroup); echo 0 > "/sys/fs/cgroup$path/memory.swap.max" 2>/dev/null || true; x=$(head -c 67108864 /dev/zero | tr '\0' x); exit $?`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
