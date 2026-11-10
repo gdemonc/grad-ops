@@ -15,3 +15,7 @@ frontend/dist/
 /gradops.exe
 *.test
 /data/
+
+# Local Go caches used by the sandboxed development environment
+/.gocache/
+/.gopath/
