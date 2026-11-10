@@ -49,8 +49,9 @@ The console can read the same value from the browser `localStorage` key
 
 ## Identity
 
-The unit runs as `gradops` with `NoNewPrivileges=yes` and an empty capability
-set. That means:
+The unit runs as `gradops` with `NoNewPrivileges=yes`. Its bounding set contains
+only the capabilities bubblewrap needs inside a private user namespace; there
+are no ambient capabilities. That means:
 
 - `GRADOPS_EXECUTOR_USER` must be empty or `gradops`
 - the service cannot switch to another user
@@ -66,7 +67,10 @@ The unit uses:
 
 - `ProtectSystem=full` (read-only `/usr`, `/boot`, `/etc`)
 - `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`
-- `NoNewPrivileges=yes`, empty `CapabilityBoundingSet`
+- `NoNewPrivileges=yes`; the bounding set contains only the capabilities
+  bubblewrap needs inside its private user namespace (`CAP_SYS_ADMIN`,
+  `CAP_SYS_CHROOT`, `CAP_SETUID`, `CAP_SETGID`, `CAP_MKNOD`,
+  `CAP_DAC_OVERRIDE`), with no ambient capabilities
 - `ProtectKernelTunables/Modules/Logs/Clock/Hostname=yes`
 - `Delegate=yes`, `DelegateSubgroup=supervisor` and
   `ProtectControlGroups=no` so the service's own PID is outside the delegated

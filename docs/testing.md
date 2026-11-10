@@ -81,7 +81,7 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 | API Bearer 认证：健康检查开放、其余路由拒绝缺失/错误 token | `api/auth_test.go`：`TestAPIHealthChecksDoNotRequireAToken`、`TestAPIRequiresTheConfiguredBearerToken`、`TestAPIWithoutATokenRemainsOpen` |
 | 无 token 时禁止非回环监听 | `config/config_test.go`：`TestNonLoopbackRequiresAnAPIToken`、`TestAPITokenAllowsNonLoopback`、`TestShortAPITokenIsRejected`、`TestLocalhostHostnameIsAllowedWithoutAToken` |
 | 整条闭环可用 | `e2e/loop_test.go`：`TestFullLoop` |
-| 部署文件保持非 root 与收紧边界 | `scripts/check-deploy.sh`：非 root、NoNewPrivileges、空 capability、ProtectSystem/Home、PrivateTmp、Namespaces/SUIDSGID、MemoryMax/TasksMax、`systemd-analyze verify` |
+| 部署文件保持非 root 与收紧边界 | `scripts/check-deploy.sh`：非 root、NoNewPrivileges、受限 capability、ProtectSystem/Home、PrivateTmp、Namespaces/SUIDSGID、MemoryMax/TasksMax、`systemd-analyze verify` |
 
 ## 没有测试覆盖的部分
 

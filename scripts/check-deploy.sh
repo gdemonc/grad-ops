@@ -40,9 +40,8 @@ done
 if grep -Eq '^User=root$' "$UNIT"; then
   fail "the unit must not run as root"
 fi
-if grep -Eq '^CapabilityBoundingSet=.*[A-Za-z]' "$UNIT"; then
-  fail "CapabilityBoundingSet must be empty"
-fi
+grep -q '^CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_MKNOD CAP_DAC_OVERRIDE' "$UNIT" \
+  || fail "CapabilityBoundingSet must contain only the bubblewrap set"
 
 grep -q 'GRADOPS_API_TOKEN=' "$ENV_FILE" || fail "environment example lacks the API token"
 grep -q 'GRADOPS_ADDR=127.0.0.1' "$ENV_FILE" || fail "environment example should default to loopback"
