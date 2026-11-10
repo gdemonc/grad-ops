@@ -31,16 +31,19 @@ PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=full
 ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
+# A fresh procfs mount inside bubblewrap's user namespace is refused when the
+# existing /proc has systemd's over-mounts. Keep the protections that do not
+# over-mount /proc; the per-action sandbox supplies its own procfs.
+ProtectKernelTunables=no
+ProtectKernelModules=no
+ProtectKernelLogs=no
 # The service creates a child cgroup per shell. systemd must delegate the
 # subtree, and the cgroup hierarchy must be writable for that delegation.
 Delegate=yes
 DelegateSubgroup=supervisor
 ProtectControlGroups=no
-ProtectClock=yes
-ProtectHostname=yes
+ProtectClock=no
+ProtectHostname=no
 RestrictNamespaces=no
 RestrictSUIDSGID=yes
 RestrictRealtime=yes

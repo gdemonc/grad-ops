@@ -71,11 +71,13 @@ The unit uses:
   bubblewrap needs inside its private user namespace (`CAP_SYS_ADMIN`,
   `CAP_SYS_CHROOT`, `CAP_SETUID`, `CAP_SETGID`, `CAP_MKNOD`,
   `CAP_DAC_OVERRIDE`), with no ambient capabilities
-- `ProtectKernelTunables/Modules/Logs/Clock/Hostname=yes`
+- `ProtectKernelTunables/Modules/Logs/Clock/Hostname=no` because these mount
+  over `/proc` and make a fresh procfs mount inside bubblewrap fail with
+  `Operation not permitted`; the per-action sandbox provides its own procfs
 - `Delegate=yes`, `DelegateSubgroup=supervisor` and
   `ProtectControlGroups=no` so the service's own PID is outside the delegated
   base cgroup and the service can create one child cgroup per shell
-- `RestrictNamespaces=yes`, `RestrictSUIDSGID=yes`, `RestrictRealtime=yes`
+- `RestrictNamespaces=no`, `RestrictSUIDSGID=yes`, `RestrictRealtime=yes`
 - `MemoryMax=1G`, `TasksMax=256`, `LimitNOFILE=1024`
 - `KillMode=control-group` so stopping the service also stops shell children
 
