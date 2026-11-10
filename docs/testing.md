@@ -102,7 +102,7 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 - **多进程并发**：单连接 SQLite 与单进程 Worker 是设计前提；多实例同时运行没有测试。
 - **API 细粒度授权**：只有可选的单一 Bearer token，没有用户、角色、任务级权限或多租户隔离；未设置 token 时同机进程仍可调用 API。
 - **CI 主机**：GitHub Actions 使用 Ubuntu 24.04，开发机验证使用 Ubuntu 26.04.1；两者都通过，但其他发行版的工具行为仍未验证。
-- **systemd unit 的逐项边界**：unit 已在真实 systemd 主机安装并运行，cgroup 内存/PID 限制和超时清理已验证；`ProtectSystem`、`PrivateTmp`、`PrivateDevices`、`CapabilityBoundingSet` 等 unit 边界的实际阻断效果尚未逐项测试。
+- **systemd unit 的逐项边界**：unit 已在真实 systemd 主机安装并运行，cgroup 内存/PID 限制和超时清理已验证；`ProtectSystem`、`PrivateTmp`、`PrivateDevices`、`CapabilityBoundingSet` 等 unit 边界的实际阻断效果尚未逐项测试；为允许 bubblewrap 创建 procfs，`ProtectKernelTunables/Modules/Logs/Clock/Hostname` 被关闭。
 - **模型行为**：`GRADOPS_PLANNER` 默认为 `stub`；模型计划器的测试只证明 schema/上限/接线成立，不证明某个真实模型会稳定遵守提示。
 - **前端**：本次在 Ubuntu 上重新执行 `npm ci && npm run build`（含 `vue-tsc`）并通过；dev 代理与真实后端的联调未重新运行。
 
