@@ -96,9 +96,17 @@ empty so controllers can be enabled. The application discovers its base from
 writable per-action cgroups. If the delegated subtree is not writable,
 startup fails instead of falling back to `direct`.
 
-The integration test for a real delegated cgroup skips when the host's cgroup
-subtree is not writable. The unit and this path have not yet been installed and
-validated on a real systemd host.
+This path was verified on a real systemd host after installing the unit:
+
+```bash
+sudo env GRADOPS_TEST_CGROUP_ROOT=/sys/fs/cgroup/system.slice/gradops.service \
+  /usr/local/go/bin/go test ./internal/shell \
+  -run 'TestSessionRunsInADedicatedCgroup|TestCgroupTimeoutKillsTheGroup' -v
+```
+
+Both tests passed; the shell saw `memory.max=67108864` and `pids.max=32`, the
+timeout killed the cgroup, and no `gradops-*` child cgroup was left behind.
+CPU quota was left at 0 in this deployment, so `cpu.max` was not exercised.
 
 The unit still does not add a network or mount namespace and does not make
 `/var/log` read-only. Those remain open work.

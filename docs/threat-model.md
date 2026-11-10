@@ -86,7 +86,7 @@
 | 审批重放、并发双消费 | 已实现：token 只存哈希、绑定摘要、单条 SQL 原子消费，并有并发用例 |
 | 路径穿越 | 部分：只检查声明的路径是否落在允许根内，未解析真实文件对象 |
 | 符号链接逃逸、TOCTOU | **未实现**：没有 dirfd/openat，也没有在打开时复核 |
-| Shell 越权与逃逸 | **部分实现**：有进程组终止、超时、输出上限、调用预算、环境白名单、prlimit 资源限制，配置 `GRADOPS_EXECUTOR_USER` 后的 uid/gid 切换（非 root 无法切换时启动失败），以及可选的 per-action cgroup v2（内存/PID/CPU，要求 systemd `Delegate=yes`）；`deploy/gradops.service` 还提供非 root 账号、NoNewPrivileges、空 capability、ProtectSystem/Home、PrivateTmp 等服务级边界。仍没有 per-action namespace、文件系统或网络隔离；cgroup 与 unit 都未在真实 systemd 主机验证 |
+| Shell 越权与逃逸 | **部分实现**：有进程组终止、超时、输出上限、调用预算、环境白名单、prlimit 资源限制，配置 `GRADOPS_EXECUTOR_USER` 后的 uid/gid 切换（非 root 无法切换时启动失败），以及可选的 per-action cgroup v2（内存/PID/CPU，要求 systemd `Delegate=yes`）；`deploy/gradops.service` 还提供非 root 账号、NoNewPrivileges、空 capability、ProtectSystem/Home、PrivateTmp 等服务级边界。真实 systemd delegated cgroup 上已验证内存/PID 限制和超时清理；仍没有 per-action namespace、文件系统或网络隔离，CPU quota 未验证 |
 | Shell 动态语义 | 部分：`internal/command` 用 AST 识别写操作、间接执行和动态命令名，并用于探针、`observe` 动作和验证命令的 fail-closed 校验；未知命令和完整运行时语义仍无法证明，Policy 仍是正则匹配 |
 | 输出耗尽 | 已实现：双流截断与标志位 |
 | 审批/数据库异常 | 部分：单连接 SQLite 与事务边界已保证，锁争用与磁盘故障未注入测试 |

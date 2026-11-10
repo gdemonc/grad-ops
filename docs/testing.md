@@ -2,7 +2,7 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、196 个 `Test` 函数；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、196 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`）；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
 
 ## 如何运行
 
@@ -13,6 +13,10 @@ GOTOOLCHAIN=go1.26.0 go build ./... && GOTOOLCHAIN=go1.26.0 go vet ./... && GOTO
 # 开发与 CI 工具链
 go build ./... && go vet ./... && go test ./... -count=1
 go test -race ./... -count=1
+
+# 真实 systemd delegated cgroup（需要 root 和目标 unit cgroup）
+GRADOPS_TEST_CGROUP_ROOT=/sys/fs/cgroup/system.slice/gradops.service \
+  go test ./internal/shell -run 'TestSessionRunsInADedicatedCgroup|TestCgroupTimeoutKillsTheGroup' -v
 ```
 
 需要 shell 的测试会自动查找 `bash`，也可以用 `GRADOPS_TEST_BASH` 指定绝对路径。需要 `prlimit` 的资源限制测试在工具缺失时会 `t.Skip`，全绿不代表这些路径跑过。
@@ -47,7 +51,7 @@ go test -race ./... -count=1
 | 两阶段模型计划器驱动真实调查，提案携带补偿动作 | `investigation/model_test.go`：`TestModelPlannerDrivesARealInvestigation`、`TestModelPlannerProposalCarriesCompensation` |
 | 主程序正确装配模型客户端 | `cmd/gradops/main_test.go`：`TestBuildPlannerWiresTheModelClient` |
 | 单次调查总时限覆盖探针与模型调用 | `investigation/model_test.go`：`TestInvestigationStopsAtTheTotalTimeout`；`config/config_test.go`：`TestInvestigationTimeoutDefaultsAndParses` |
-| cgroup v2 配置校验、fail-closed 与真实 cgroup 集成 | `shell/cgroup_test.go`：`TestValidateCgroupDisabledIsANoOp`、`TestValidateCgroupRejectsInvalidLimits`、`TestValidateCgroupFailsOutsideACgroupHierarchy`、`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`；`config/config_test.go`：`TestRuntimeModeDefaultsToDirect`、`TestCgroupRuntimeParsesLimits`、`TestRuntimeModeRejectsUnknownValues` |
+| cgroup v2 配置校验、fail-closed 与真实 cgroup 集成 | `shell/cgroup_test.go`：`TestValidateCgroupDisabledIsANoOp`、`TestValidateCgroupRejectsInvalidLimits`、`TestValidateCgroupFailsOutsideACgroupHierarchy`、`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`（真实 systemd delegated cgroup 上通过）；`config/config_test.go`：`TestRuntimeModeDefaultsToDirect`、`TestCgroupRuntimeParsesLimits`、`TestRuntimeModeRejectsUnknownValues` |
 | 执行/回滚超时记为 UNKNOWN/失败但结果仍落库 | `executor/executor_test.go`：`TestExecutionCeilingIsRecordedAsUnknown`、`TestCancelledRequestStillRecordsTheUnknownOutcome`；`executor/recovery_test.go`：`TestRecoveryCeilingIsRecordedAsFailure`；`config/config_test.go`：`TestExecutionTimeoutDefaultsAndParses` |
 | 被完全攻陷的模型仍不能直接写主机或绕过审批 | `investigation/adversarial_test.go`：`TestCompromisedModelCannotMakeAProbeWrite`、`TestCompromisedModelCannotHideAWriteBehindObserve`、`TestCompromisedModelCannotExecuteWithoutApproval`、`TestCompromisedModelCannotBypassTheResponseBound` |
 | observe 契约中的写操作在执行前被拒绝 | `executor/executor_test.go`：`TestRejectsObserveContractWithWrite` |
@@ -76,7 +80,8 @@ go test -race ./... -count=1
 这些不是“以后再说”的清单，而是当前测试结果不能证明的东西：
 
 - **uid 切换的成功路径**：只有 root 且目标账号存在时才会发生。本机以普通用户运行，覆盖的是拒绝路径；不能据此声称“切换已实测可用”。
-- **per-action cgroup 的真实效果**：`cgroup-v2` 需要可写的 delegated cgroup 子树；本机 `/sys/fs/cgroup` 只读，相关集成测试会 skip，未在真实 systemd 服务中验证内存/PID/CPU 限制。
+- **cgroup CPU quota 与 worker 路径**：真实主机验证了 `memory.max`、`pids.max` 和超时清理，但当前部署的 CPU quota 为 0，未验证 `cpu.max`；验证使用 shell 集成测试，没有单独观察 Worker 任务产生的子 cgroup。
+- **cgroup 之外的隔离**：没有 namespace、文件系统或网络隔离。
 - **文件系统与网络隔离**：没有 Landlock、Bubblewrap、seccomp、只读挂载或网络策略。
 - **真实 `/var/log` 文件边界**：路径只在策略层做词法规整；没有 symlink、TOCTOU 或 `openat2` 测试。
 - **AST 分析的完整性**：分析器只识别已知命令和已知间接执行形式；未知命令、运行时展开、外部脚本和复杂数据流仍可能写文件。它被明确当作辅助校验，不是沙箱。
@@ -87,7 +92,7 @@ go test -race ./... -count=1
 - **多进程并发**：单连接 SQLite 与单进程 Worker 是设计前提；多实例同时运行没有测试。
 - **API 细粒度授权**：只有可选的单一 Bearer token，没有用户、角色、任务级权限或多租户隔离；未设置 token 时同机进程仍可调用 API。
 - **CI 主机**：GitHub Actions 使用 Ubuntu 24.04，开发机验证使用 Ubuntu 26.04.1；两者都通过，但其他发行版的工具行为仍未验证。
-- **systemd 运行时**：unit 通过静态检查与 `systemd-analyze verify`，但没有在真实 systemd 主机安装、启动并验证 `ProtectSystem`、`PrivateTmp`、资源上限的实际效果。
+- **systemd unit 的逐项边界**：unit 已在真实 systemd 主机安装并运行，cgroup 内存/PID 限制和超时清理已验证；`ProtectSystem`、`PrivateTmp`、`PrivateDevices`、`CapabilityBoundingSet` 等 unit 边界的实际阻断效果尚未逐项测试。
 - **模型行为**：`GRADOPS_PLANNER` 默认为 `stub`；模型计划器的测试只证明 schema/上限/接线成立，不证明某个真实模型会稳定遵守提示。
 - **前端**：本次在 Ubuntu 上重新执行 `npm ci && npm run build`（含 `vue-tsc`）并通过；dev 代理与真实后端的联调未重新运行。
 
