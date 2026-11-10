@@ -19,6 +19,7 @@ import (
 
 	"github.com/gdemonc/grad-ops/internal/approval"
 	"github.com/gdemonc/grad-ops/internal/audit"
+	"github.com/gdemonc/grad-ops/internal/command"
 	"github.com/gdemonc/grad-ops/internal/contract"
 	"github.com/gdemonc/grad-ops/internal/domain"
 	"github.com/gdemonc/grad-ops/internal/evidence"
@@ -46,6 +47,9 @@ var (
 	// ErrRunAsUnsupported means the contract asks for an identity this process
 	// cannot assume, and enforcement is on.
 	ErrRunAsUnsupported = errors.New("the contract requires an identity this process cannot assume")
+	// ErrUnsafeScript means the script's recognized effects contradict its
+	// declared kind. The contract is refused before anything runs.
+	ErrUnsafeScript = errors.New("script has effects its declared kind does not allow")
 )
 
 // Outcome statuses.
@@ -105,6 +109,10 @@ type Service struct {
 	// become. It is the fail-closed alternative to silently running an action
 	// as the service account while its contract says otherwise.
 	requireRunAsMatch bool
+	// runAs is the identity the executor was configured to assume. When set,
+	// the contract must name the same identity and the shell switches to it.
+	runAs  string
+	limits shell.Limits
 }
 
 // Config is the executor's fixed configuration.
@@ -118,6 +126,12 @@ type Config struct {
 	// process identity. Without a Linux runtime the process cannot switch user,
 	// so leaving this off means the contract's identity is aspirational.
 	RequireRunAsMatch bool
+	// RunAs is the identity the executor should assume for every action. When
+	// set, the contract's run_as must match it, and the shell actually switches
+	// to it (or startup fails).
+	RunAs string
+	// Limits bounds each action's shell process.
+	Limits shell.Limits
 }
 
 // New builds a service.
@@ -139,6 +153,8 @@ func New(db *store.DB, engine *policy.Engine, approvals *approval.Service, ev *e
 		now:               time.Now,
 		mapWorkDir:        func(path string) string { return path },
 		requireRunAsMatch: cfg.RequireRunAsMatch,
+		runAs:             strings.TrimSpace(cfg.RunAs),
+		limits:            cfg.Limits,
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -175,7 +191,20 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("%w: script digest mismatch", ErrContractTampered)
 	}
 
-	// 2. Policy must still reach the same risk level. A contract that claims a
+	// 2. A contract declared read-only must not contain a write, an indirect
+	// execution path or a command name assembled at runtime. This is a second
+	// opinion; policy and the runtime still bound an action that passes it.
+	analysis, err := command.Analyze(proposal.Contract.Script)
+	if err != nil {
+		s.reject(ctx, proposal, req.Actor, "script cannot be parsed", err)
+		return Outcome{}, fmt.Errorf("%w: %v", ErrUnsafeScript, err)
+	}
+	if proposal.Contract.Kind == string(policy.KindObserve) && !analysis.ReadOnly() {
+		s.reject(ctx, proposal, req.Actor, "script effects disagree with declared kind", nil)
+		return Outcome{}, fmt.Errorf("%w: %s", ErrUnsafeScript, analysis.Summary())
+	}
+
+	// 3. Policy must still reach the same risk level. A contract that claims a
 	// lower risk than the current rules allow is refused, not downgraded.
 	evaluation := s.policy.Evaluate(policy.Request{
 		Subject:    policy.Subject{ID: req.Actor},
@@ -205,6 +234,15 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 	if s.requireRunAsMatch && !identityMatches(proposal.Contract.RunAs) {
 		s.reject(ctx, proposal, req.Actor, "run_as cannot be assumed by this process", nil)
 		return Outcome{}, fmt.Errorf("%w: contract asks for %q", ErrRunAsUnsupported, proposal.Contract.RunAs)
+	}
+
+	// 2.6 A configured runtime identity is authoritative. A contract naming a
+	// different user is refused rather than executed as the configured user
+	// while claiming otherwise.
+	if s.runAs != "" && strings.TrimSpace(proposal.Contract.RunAs) != s.runAs {
+		s.reject(ctx, proposal, req.Actor, "run_as differs from the configured executor identity", nil)
+		return Outcome{}, fmt.Errorf("%w: contract asks for %q, executor runs as %q",
+			ErrRunAsUnsupported, proposal.Contract.RunAs, s.runAs)
 	}
 
 	// 3. The window the approver saw must still be open.
@@ -536,6 +574,8 @@ func (s *Service) session(c contract.Contract) (*shell.Session, error) {
 		Timeout:        time.Duration(c.Runtime.TimeoutMS) * time.Millisecond,
 		MaxOutputBytes: int(c.Runtime.MaxOutputBytes),
 		MaxCalls:       int(c.Runtime.MaxCalls),
+		RunAs:          s.runAs,
+		Limits:         s.limits,
 	})
 }
 

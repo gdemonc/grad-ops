@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -141,6 +142,11 @@ func newHarness(t *testing.T) *harness {
 
 func newHarnessWith(t *testing.T, enforceRunAs bool) *harness {
 	t.Helper()
+	return newHarnessRuntime(t, enforceRunAs, "")
+}
+
+func newHarnessRuntime(t *testing.T, enforceRunAs bool, runAs string) *harness {
+	t.Helper()
 
 	bash := requireBash(t)
 	workdir := t.TempDir()
@@ -159,6 +165,7 @@ func newHarnessWith(t *testing.T, enforceRunAs bool) *harness {
 		Bash:              bash,
 		BaseEnv:           map[string]string{"PATH": os.Getenv("PATH"), "HOME": workdir},
 		RequireRunAsMatch: enforceRunAs,
+		RunAs:             runAs,
 	}, executor.WithWorkDirMapper(func(string) string { return workdir }))
 	if err != nil {
 		t.Fatalf("executor: %v", err)
@@ -481,5 +488,112 @@ func TestRunAsMismatchIsRefusedWhenEnforced(t *testing.T) {
 	}
 	if events != 1 {
 		t.Fatalf("expected the refusal to be audited once, got %d", events)
+	}
+}
+
+func TestExecuteUsesConfiguredIdentity(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Skipf("cannot resolve the current user: %v", err)
+	}
+
+	h := newHarnessRuntime(t, false, current.Username)
+	c, digest := buildContract(t, "printf 'identity'", "R2")
+	c.RunAs = current.Username
+	if err := c.Canonicalize(); err != nil {
+		t.Fatalf("canonicalize: %v", err)
+	}
+	if digest, err = c.Digest(); err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+
+	taskID, proposalID := seed(t, h.db, c, digest)
+	token := h.approve(t, taskID, proposalID, digest)
+
+	outcome, err := h.service.Execute(context.Background(), executor.Request{
+		ProposalID:    proposalID,
+		ApprovalToken: token,
+		Actor:         "worker-1",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Status != executor.StatusSucceeded {
+		t.Fatalf("expected SUCCEEDED, got %s (%s)", outcome.Status, outcome.Stderr)
+	}
+
+	var recorded string
+	if err := h.db.QueryRow(`SELECT run_as FROM execution_records WHERE proposal_id = ?`, proposalID).Scan(&recorded); err != nil {
+		t.Fatalf("read execution identity: %v", err)
+	}
+	if recorded != current.Username {
+		t.Fatalf("recorded run_as %q, want %q", recorded, current.Username)
+	}
+}
+
+func TestConfiguredIdentityMustMatchTheContract(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Skipf("cannot resolve the current user: %v", err)
+	}
+	if current.Username == "gradops-agent" {
+		t.Skip("the fixture identity happens to be the current user")
+	}
+
+	h := newHarnessRuntime(t, false, current.Username)
+	c, digest := buildContract(t, "printf 'x'", "R2")
+	taskID, proposalID := seed(t, h.db, c, digest)
+	token := h.approve(t, taskID, proposalID, digest)
+
+	_, err = h.service.Execute(context.Background(), executor.Request{
+		ProposalID:    proposalID,
+		ApprovalToken: token,
+		Actor:         "worker-1",
+	})
+	if !errors.Is(err, executor.ErrRunAsUnsupported) {
+		t.Fatalf("expected ErrRunAsUnsupported, got %v", err)
+	}
+
+	var executions int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM execution_records`).Scan(&executions); err != nil {
+		t.Fatalf("count executions: %v", err)
+	}
+	if executions != 0 {
+		t.Fatal("an identity mismatch must not produce an execution record")
+	}
+	if status, _ := taskStatus(t, h.db, taskID); status != string(domain.StatusAwaitingApproval) {
+		t.Fatalf("the task should be untouched, got %s", status)
+	}
+}
+
+func TestRejectsObserveContractWithWrite(t *testing.T) {
+	h := newHarness(t)
+	c, _ := buildContract(t, "touch /var/log/app.log", "R0")
+	c.Kind = string(policy.KindObserve)
+	c.Paths = nil
+	c.Reversible = false
+	if err := c.Canonicalize(); err != nil {
+		t.Fatalf("canonicalize: %v", err)
+	}
+	newDigest, err := c.Digest()
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	_, proposalID := seed(t, h.db, c, newDigest)
+
+	_, err = h.service.Execute(context.Background(), executor.Request{
+		ProposalID: proposalID,
+		Actor:      "worker-1",
+	})
+	if !errors.Is(err, executor.ErrUnsafeScript) {
+		t.Fatalf("expected ErrUnsafeScript, got %v", err)
+	}
+
+	var executions int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM execution_records`).Scan(&executions); err != nil {
+		t.Fatalf("count executions: %v", err)
+	}
+	if executions != 0 {
+		t.Fatal("an observe contract with a write must not produce an execution record")
 	}
 }

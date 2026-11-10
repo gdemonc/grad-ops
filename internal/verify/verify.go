@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gdemonc/grad-ops/internal/audit"
+	"github.com/gdemonc/grad-ops/internal/command"
 	"github.com/gdemonc/grad-ops/internal/contract"
 	"github.com/gdemonc/grad-ops/internal/domain"
 	"github.com/gdemonc/grad-ops/internal/evidence"
@@ -31,6 +32,9 @@ var (
 	ErrNoExecutedProposal = errors.New("task has no executed proposal")
 	// ErrInvalidRequest means the caller supplied an unusable request.
 	ErrInvalidRequest = errors.New("invalid verification request")
+	// ErrUnsafePostcondition means the verification command is not read-only.
+	// Verification must observe, not repair, so it is refused before running.
+	ErrUnsafePostcondition = errors.New("postcondition is not read-only")
 )
 
 // Result describes one verification.
@@ -56,6 +60,12 @@ type Config struct {
 	Timeout time.Duration
 	// MaxOutputBytes bounds each captured stream.
 	MaxOutputBytes int
+	// RunAs is the identity verification commands run as. It should match the
+	// identity the action ran as, otherwise the check may see a different
+	// filesystem view.
+	RunAs string
+	// Limits bounds the verification shell.
+	Limits shell.Limits
 }
 
 // Option customises a Service.
@@ -77,6 +87,8 @@ type Service struct {
 	baseEnv    map[string]string
 	timeout    time.Duration
 	maxOutput  int
+	runAs      string
+	limits     shell.Limits
 	now        func() time.Time
 	mapWorkDir func(string) string
 }
@@ -103,6 +115,8 @@ func New(db *store.DB, ev *evidence.Store, cfg Config, opts ...Option) (*Service
 		baseEnv:    cfg.BaseEnv,
 		timeout:    cfg.Timeout,
 		maxOutput:  cfg.MaxOutputBytes,
+		runAs:      strings.TrimSpace(cfg.RunAs),
+		limits:     cfg.Limits,
 		now:        time.Now,
 		mapWorkDir: func(path string) string { return path },
 	}
@@ -133,6 +147,13 @@ func (s *Service) Verify(ctx context.Context, taskID int64) (Result, error) {
 	if err := contract.Verify(c, digest); err != nil {
 		return Result{}, fmt.Errorf("verify contract: %w", err)
 	}
+	analysis, err := command.Analyze(c.Postcondition.Command)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %v", ErrUnsafePostcondition, err)
+	}
+	if !analysis.ReadOnly() {
+		return Result{}, fmt.Errorf("%w: %s", ErrUnsafePostcondition, analysis.Summary())
+	}
 
 	session, err := shell.NewSession(shell.Config{
 		Executable:     s.bash,
@@ -141,6 +162,8 @@ func (s *Service) Verify(ctx context.Context, taskID int64) (Result, error) {
 		Timeout:        s.timeout,
 		MaxOutputBytes: s.maxOutput,
 		MaxCalls:       1,
+		RunAs:          s.runAs,
+		Limits:         s.limits,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare verification shell: %w", err)

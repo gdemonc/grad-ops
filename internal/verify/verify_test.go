@@ -253,3 +253,25 @@ func TestVerificationRequiresTheRightTaskState(t *testing.T) {
 		t.Fatalf("expected ErrNotVerifiable, got %v", err)
 	}
 }
+
+func TestRejectsMutatingPostcondition(t *testing.T) {
+	db := testDB(t)
+	workdir := t.TempDir()
+	taskID, _ := seedExecuted(t, db, contract.Postcondition{
+		Command:        "touch /var/log/app.log",
+		ExpectExitCode: 0,
+	})
+
+	_, err := newService(t, db, workdir).Verify(context.Background(), taskID)
+	if !errors.Is(err, verify.ErrUnsafePostcondition) {
+		t.Fatalf("expected ErrUnsafePostcondition, got %v", err)
+	}
+
+	var records int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM verification_records`).Scan(&records); err != nil {
+		t.Fatalf("count verifications: %v", err)
+	}
+	if records != 0 {
+		t.Fatalf("a mutating postcondition must not produce a verification record, got %d", records)
+	}
+}
