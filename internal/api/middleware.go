@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gdemonc/grad-ops/internal/audit"
@@ -18,6 +21,48 @@ func verifyChain(r *http.Request, db *store.DB) (audit.Result, error) {
 // contextWithTimeout bounds a handler's database work.
 func contextWithTimeout(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), d)
+}
+
+// bearerAuth requires a valid bearer token for every API route. Health checks
+// stay open so a supervisor can probe the process without a credential.
+//
+// The comparison hashes both sides first, so it does not reveal the token's
+// length through timing.
+func bearerAuth(token string, next http.Handler) http.Handler {
+	expected := sha256.Sum256([]byte(token))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/api/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		provided, ok := bearerToken(r.Header.Get("Authorization"))
+		if !ok {
+			writeMissingAuth(w)
+			return
+		}
+		actual := sha256.Sum256([]byte(provided))
+		if subtle.ConstantTimeCompare(actual[:], expected[:]) != 1 {
+			writeMissingAuth(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func bearerToken(header string) (string, bool) {
+	fields := strings.Fields(header)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+		return "", false
+	}
+	if fields[1] == "" {
+		return "", false
+	}
+	return fields[1], true
+}
+
+func writeMissingAuth(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="gradops"`)
+	writeError(w, http.StatusUnauthorized, "unauthorized", "a valid API bearer token is required")
 }
 
 // statusRecorder captures the status code for request logging.

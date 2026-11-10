@@ -35,6 +35,9 @@ type Deps struct {
 	Verifier        *verify.Service
 	Version         string
 	MaxRequestBytes int64
+	// APIToken, when non-empty, is required as a bearer token on every route
+	// except the health checks.
+	APIToken string
 	// Runtime is reported by /api/safety. It is informational only.
 	Runtime RuntimeInfo
 }
@@ -69,7 +72,11 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/proposals/{id}/execute", h.executeProposal)
 	mux.HandleFunc("GET /api/audit/verify", h.verifyAudit)
 
-	return recoveryMiddleware(d.Logger, loggingMiddleware(d.Logger, mux))
+	var handler http.Handler = mux
+	if d.APIToken != "" {
+		handler = bearerAuth(d.APIToken, handler)
+	}
+	return recoveryMiddleware(d.Logger, loggingMiddleware(d.Logger, handler))
 }
 
 type handlers struct {
