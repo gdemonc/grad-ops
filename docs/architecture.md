@@ -108,7 +108,7 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 
 ### 4.4 Linux Runtime 是最终执行边界
 
-首期以 Linux 原生机制构建轻量 Runtime，而不是先引入完整容器编排平台。当前已实现可选的 cgroup v2 子 cgroup（内存/进程/CPU 限制）、systemd unit 的 `Delegate=yes`，以及可选的 bubblewrap 沙箱（独立 mount/PID/IPC/UTS/user/network namespace、只读根和可写根绑定）。真实 systemd delegated cgroup 上验证了内存/PID/CPU 限制和超时清理；bubblewrap 沙箱尚未在真实 systemd 服务中验证，默认关闭。
+首期以 Linux 原生机制构建轻量 Runtime，而不是先引入完整容器编排平台。当前已实现可选的 cgroup v2 子 cgroup（内存/进程/CPU 限制）、systemd unit 的 `Delegate=yes`，以及可选的 bubblewrap 沙箱（独立 mount/PID/IPC/UTS/user/network namespace、只读根和可写根绑定）。真实 systemd delegated cgroup 上验证了内存/PID/CPU 限制和超时清理；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针验证，默认关闭但部署示例启用。
 
 1. API/Agent 主服务使用专用非 root 账号；Shell 执行账号与主服务身份分离。
 2. 每个任务或操作会话使用独立的 systemd transient service/scope 或等效 cgroup，限制 CPU、内存、Tasks/PID、执行时间、文件大小和输出量。

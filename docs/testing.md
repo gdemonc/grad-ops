@@ -2,7 +2,7 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、204 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、204 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针 `SEALED`，`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 通过；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
 
 ## 如何运行
 
@@ -58,7 +58,7 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 | 两阶段模型计划器驱动真实调查，提案携带补偿动作 | `investigation/model_test.go`：`TestModelPlannerDrivesARealInvestigation`、`TestModelPlannerProposalCarriesCompensation` |
 | 主程序正确装配模型客户端 | `cmd/gradops/main_test.go`：`TestBuildPlannerWiresTheModelClient` |
 | 单次调查总时限覆盖探针与模型调用 | `investigation/model_test.go`：`TestInvestigationStopsAtTheTotalTimeout`；`config/config_test.go`：`TestInvestigationTimeoutDefaultsAndParses` |
-| bubblewrap 沙箱参数、fail-closed 与真实 namespace 边界 | `shell/sandbox_args_test.go`：`TestSandboxArgsApplyTheFilesystemAndNamespaceBoundary`、`TestSandboxArgsCanShareTheNetwork`、`TestSandboxArgsRejectAWritableRoot`、`TestValidateSandboxFailsClosed`；`shell/sandbox_test.go`：`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot`（bwrap 不可用时 skip）；`config/config_test.go`：`TestSandboxDefaultsToNoneAndParsesOptions`、`TestSandboxRejectsUnknownModeAndRelativeBinary` |
+| bubblewrap 沙箱参数、fail-closed 与真实 namespace 边界 | `shell/sandbox_args_test.go`：`TestSandboxArgsApplyTheFilesystemAndNamespaceBoundary`、`TestSandboxArgsCanShareTheNetwork`、`TestSandboxArgsRejectAWritableRoot`、`TestValidateSandboxFailsClosed`；`shell/sandbox_test.go`：`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot`（真实 bwrap 上通过）；`config/config_test.go`：`TestSandboxDefaultsToNoneAndParsesOptions`、`TestSandboxRejectsUnknownModeAndRelativeBinary` |
 | cgroup v2 配置校验、fail-closed 与真实 cgroup 集成 | `shell/cgroup_test.go`：`TestValidateCgroupDisabledIsANoOp`、`TestValidateCgroupRejectsInvalidLimits`、`TestValidateCgroupFailsOutsideACgroupHierarchy`、`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`（真实 systemd delegated cgroup 上通过）、`TestCgroupCPUQuotaIsApplied`（真实 cgroup 上以 `50000/100000` 通过）；`config/config_test.go`：`TestRuntimeModeDefaultsToDirect`、`TestCgroupRuntimeParsesLimits`、`TestRuntimeModeRejectsUnknownValues` |
 | 执行/回滚超时记为 UNKNOWN/失败但结果仍落库 | `executor/executor_test.go`：`TestExecutionCeilingIsRecordedAsUnknown`、`TestCancelledRequestStillRecordsTheUnknownOutcome`；`executor/recovery_test.go`：`TestRecoveryCeilingIsRecordedAsFailure`；`config/config_test.go`：`TestExecutionTimeoutDefaultsAndParses` |
 | 被完全攻陷的模型仍不能直接写主机或绕过审批 | `investigation/adversarial_test.go`：`TestCompromisedModelCannotMakeAProbeWrite`、`TestCompromisedModelCannotHideAWriteBehindObserve`、`TestCompromisedModelCannotExecuteWithoutApproval`、`TestCompromisedModelCannotBypassTheResponseBound` |
@@ -89,7 +89,7 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 
 - **uid 切换的成功路径**：只有 root 且目标账号存在时才会发生。本机以普通用户运行，覆盖的是拒绝路径；不能据此声称“切换已实测可用”。
 - **cgroup 控制器范围**：真实主机验证了 `memory.max`、`pids.max`、`cpu.max` 和超时清理；`cpuset`、`io` 没有配置或测试。
-- **bubblewrap 沙箱的真实 systemd 服务效果**：单元测试覆盖参数、只读根和 loopback-only 网络；`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 在 bwrap 不可用时 skip，尚未在安装后的 `gradops.service` 中验证。
+- **bubblewrap 的逐项边界**：真实 systemd 服务启动探测通过，worker 探针在沙箱内 `SEALED`，root-only/loopback-only 集成测试通过；没有逐项验证每个可写根、DNS/网络副作用或所有外部命令的兼容性。
 - **cgroup 之外的隔离**：没有更细的 mount/network 策略；bubblewrap 默认关闭。
 - **worker 路径**：cgroup 验证使用 shell 集成测试，没有单独观察 Worker 任务产生的子 cgroup。
 - **文件系统与网络隔离**：没有 Landlock、Bubblewrap、seccomp、只读挂载或网络策略。

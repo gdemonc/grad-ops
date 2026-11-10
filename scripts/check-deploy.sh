@@ -26,6 +26,11 @@ for directive in \
   'PrivateTmp=yes' \
   'ProtectSystem=full' \
   'ProtectHome=yes' \
+  'ProtectKernelTunables=no' \
+  'ProtectKernelModules=no' \
+  'ProtectKernelLogs=no' \
+  'ProtectClock=no' \
+  'ProtectHostname=no' \
   'Delegate=yes' \
   'DelegateSubgroup=supervisor' \
   'ProtectControlGroups=no' \

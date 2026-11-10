@@ -155,8 +155,10 @@ sudo /usr/local/go/bin/go test ./internal/shell -run TestBubblewrapSessionHasNoH
 ```
 
 The service-level unit still does not make `/var/log` read-only; the bubblewrap
-sandbox is the per-shell filesystem boundary. Namespace/network behavior has
-not yet been tested from inside the installed systemd service.
+sandbox is the per-shell filesystem boundary. The installed service passed the
+startup probe and a worker task's probes completed and sealed inside the
+sandbox; `TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` also passed on
+the host.
 
 ## Verify
 

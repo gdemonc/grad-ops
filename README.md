@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 客户端与两阶段计划器已实现（默认仍用 stub），Linux Runtime 的 per-action cgroup v2（可选）、uid 切换、prlimit 资源限制和可选的 bubblewrap 命名空间/文件系统沙箱已实现；sandbox 尚未在真实 systemd 服务中验证。详见[当前实现状态](#当前实现状态)。
+> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 客户端与两阶段计划器已实现（默认仍用 stub），Linux Runtime 的 per-action cgroup v2（可选）、uid 切换、prlimit 资源限制和可选的 bubblewrap 命名空间/文件系统沙箱已实现，并已在真实 systemd 服务中验证。详见[当前实现状态](#当前实现状态)。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -87,16 +87,16 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
 | LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
-| per-action bubblewrap 沙箱 | 已实现（可选）：`GRADOPS_SANDBOX=bubblewrap` 时使用独立 mount/PID/IPC/UTS/user/network namespace、只读根和按策略绑定的可写根；默认 `none`，尚未在真实 systemd 服务中验证 |
-| Linux 隔离（systemd、文件系统、网络） | **部分实现**：bubblewrap 沙箱是可选项；默认部署没有 namespace/文件系统/网络隔离 |
+| per-action bubblewrap 沙箱 | 已实现并验证：`GRADOPS_SANDBOX=bubblewrap` 时使用独立 mount/PID/IPC/UTS/user/network namespace、只读根和按策略绑定的可写根；真实 systemd 服务上启动校验通过，任务探针在沙箱内完成并封存 |
+| Linux 隔离（systemd、文件系统、网络） | **已实现（可选）**：bubblewrap 沙箱提供 namespace、只读根和默认隔离网络；默认 `.env.example` 为 `none`，部署示例启用 `bubblewrap` |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
 | Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)） |
 | systemd 部署 | 已实现：hardened unit、环境文件、安装脚本和静态检查；已在真实 systemd 主机安装运行，per-action cgroup 验证通过；`ProtectSystem`/`PrivateTmp` 等 unit 边界的逐项运行效果未单独测试 |
 
 ### 已验证 / 未验证
 
-- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）；per-action cgroup v2 在真实 systemd delegated cgroup 上通过 shell 集成测试（`memory.max=67108864`、`pids.max=32`、`cpu.max=50000 100000`、超时清理、无残留子 cgroup）。
-- **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、cgroup 的 `cpuset`/`io` 控制器、bubblewrap 沙箱在真实 systemd 服务中的 namespace/文件系统/网络边界。这些不能因为测试套件全绿而被视为已实现。
+- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存），没有用真实 provider 密钥跑过；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）；per-action cgroup v2 在真实 systemd delegated cgroup 上通过 shell 集成测试（`memory.max=67108864`、`pids.max=32`、`cpu.max=50000 100000`、超时清理、无残留子 cgroup）；bubblewrap 沙箱在真实 systemd 服务中完成启动探测，worker 探针在沙箱内执行并到达 `SEALED`，root-only/loopback-only 集成测试通过。
+- **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、cgroup 的 `cpuset`/`io` 控制器。这些不能因为测试套件全绿而被视为已实现。
 - **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)）。
 - 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用此前的开发机结果，本次未重跑。
 
@@ -127,10 +127,10 @@ POST /api/tasks
 ### 已知限制（不是待办清单的装饰）
 
 - **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
-- **bubblewrap 沙箱**：代码已实现，但默认 `GRADOPS_SANDBOX=none`；真实 systemd 服务上的 namespace、只读根和网络隔离尚未验证。部署示例启用 `bubblewrap`，启动时会实际探测，失败则拒绝启动。
+- **bubblewrap 沙箱**：代码已实现，部署示例启用 `bubblewrap`；真实 systemd 服务上启动探测通过，任务探针在沙箱内完成并封存。默认 `.env.example` 仍为 `none`，需要显式启用。
 - **per-action cgroup**：`cgroup-v2` 模式已安装到真实 systemd 主机，并在 delegated cgroup 上用 shell 集成测试验证了子 cgroup 创建、`memory.max`/`pids.max`/`cpu.max` 生效和超时清理；默认仍是 `direct`，只使用 prlimit。systemd unit 已配置 `Delegate=yes`、`DelegateSubgroup=supervisor`。
 - **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`。配置 `GRADOPS_EXECUTOR_USER` 后，服务会解析该账号并真正切换 uid/gid；非 root 进程无法切换到其他用户时启动失败。未配置时仍以服务进程身份运行，此时设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 会拒绝身份不一致的契约并写入 `execution.rejected`。uid 切换的成功路径尚未在 root 环境实测。
-- **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前提供进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid 切换、可选 per-action cgroup v2 和可选 bubblewrap 沙箱；bubblewrap 默认关闭且尚未在真实 systemd 服务中验证。
+- **策略仍是模式匹配**：危险命令检测是正则，不是 AST。新增的 AST 分析只用于校验“探针/observe/验证命令是否只读”，它不认识所有命令，也不解析运行时展开；未知命令仍可能写文件。真正的边界是 Runtime，而 Runtime 目前提供进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid 切换、可选 per-action cgroup v2 和可选 bubblewrap 沙箱；bubblewrap 默认关闭，部署示例启用并已在真实 systemd 服务中验证。
 - **资源限制依赖 util-linux**：`prlimit` 缺失时服务会拒绝启动；限制值默认适合只读探针和小文件，不保证兼容所有运维命令。
 - **时限**：`GRADOPS_INVESTIGATION_TIMEOUT` 限制调查阶段（探针 + 模型调用），默认 5 分钟；`GRADOPS_EXECUTION_TIMEOUT` 限制单个已批准动作/补偿的紧急执行上限，默认 5 分钟。审批等待和人工复核没有任务级时限。
 - **API 认证**：设置 `GRADOPS_API_TOKEN` 后所有 `/api` 路由要求 Bearer token；未设置时只允许 `127.0.0.1` / `localhost` / `::1` 监听，同机进程仍可无认证调用。当前没有用户、角色或按任务的细粒度授权。
