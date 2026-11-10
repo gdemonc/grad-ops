@@ -5,6 +5,7 @@ package shell_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -96,5 +97,45 @@ func TestCgroupTimeoutKillsTheGroup(t *testing.T) {
 	}
 	if !result.TimedOut {
 		t.Fatalf("expected a timeout, got %+v", result)
+	}
+}
+
+func TestCgroupCPUQuotaIsApplied(t *testing.T) {
+	rawQuota := strings.TrimSpace(os.Getenv("GRADOPS_TEST_CGROUP_CPU_QUOTA_MICROS"))
+	if rawQuota == "" {
+		t.Skip("set GRADOPS_TEST_CGROUP_CPU_QUOTA_MICROS to exercise cpu.max")
+	}
+	rawPeriod := strings.TrimSpace(os.Getenv("GRADOPS_TEST_CGROUP_CPU_PERIOD_MICROS"))
+	if rawPeriod == "" {
+		rawPeriod = "100000"
+	}
+	var quota, period int64
+	if _, err := fmt.Sscanf(rawQuota, "%d", &quota); err != nil || quota <= 0 {
+		t.Fatalf("invalid quota %q", rawQuota)
+	}
+	if _, err := fmt.Sscanf(rawPeriod, "%d", &period); err != nil || period <= 0 {
+		t.Fatalf("invalid period %q", rawPeriod)
+	}
+
+	cfg := baseConfig(t)
+	cfg.Cgroup = testCgroupConfig()
+	cfg.Cgroup.CPUQuotaMicros = quota
+	cfg.Cgroup.CPUPeriodMicros = period
+	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
+		t.Skipf("no delegated cgroup with cpu controller here: %v", err)
+	}
+
+	session, err := shell.NewSession(cfg)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	result, err := session.Run(context.Background(),
+		`path=$(cut -d: -f3 /proc/self/cgroup); cat "/sys/fs/cgroup$path/cpu.max"`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := fmt.Sprintf("%d %d", quota, period)
+	if result.ExitCode != 0 || !strings.Contains(result.Stdout, want) {
+		t.Fatalf("cpu.max = %q, want %q (stderr=%q)", result.Stdout, want, result.Stderr)
 	}
 }

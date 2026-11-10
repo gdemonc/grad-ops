@@ -158,6 +158,7 @@ systemd 部署：
 ```bash
 go build -o bin/gradops ./cmd/gradops
 sudo deploy/install.sh ./bin/gradops
+sudo scripts/verify-cgroup.sh
 ```
 
 细节、权限和边界见 [systemd 部署](deploy/README.md)。

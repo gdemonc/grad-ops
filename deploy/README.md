@@ -96,13 +96,18 @@ empty so controllers can be enabled. The application discovers its base from
 writable per-action cgroups. If the delegated subtree is not writable,
 startup fails instead of falling back to `direct`.
 
-This path was verified on a real systemd host after installing the unit:
+This path was verified on a real systemd host after installing the unit.
+The repeatable check is:
 
 ```bash
-sudo env GRADOPS_TEST_CGROUP_ROOT=/sys/fs/cgroup/system.slice/gradops.service \
-  /usr/local/go/bin/go test ./internal/shell \
-  -run 'TestSessionRunsInADedicatedCgroup|TestCgroupTimeoutKillsTheGroup' -v
+sudo scripts/verify-cgroup.sh
 ```
+
+It verifies the unit properties, the delegated controllers, the shell
+integration tests and cleanup. To exercise `cpu.max`, set a non-zero
+`GRADOPS_CGROUP_CPU_QUOTA_MICROS` in `/etc/gradops/gradops.env`, restart the
+service, and run the script again; it then also checks the CPU controller and
+`cpu.max`.
 
 Both tests passed; the shell saw `memory.max=67108864` and `pids.max=32`, the
 timeout killed the cgroup, and no `gradops-*` child cgroup was left behind.
