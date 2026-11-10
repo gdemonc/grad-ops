@@ -83,6 +83,9 @@ func ValidateSandbox(cfg SandboxConfig) error {
 		"--", "/bin/true",
 	)
 	probe.Env = []string{"PATH=/usr/bin:/bin", "HOME=/tmp"}
+	// If bubblewrap leaves a namespace child holding the output pipe, Wait
+	// must not block the whole service startup forever.
+	probe.WaitDelay = 2 * time.Second
 	output, err := probe.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: bubblewrap probe failed: %v (%s)", ErrInvalidConfig, err, abbreviatedOutput(output))

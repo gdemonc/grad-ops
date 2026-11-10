@@ -58,11 +58,16 @@ func run() error {
 		return err
 	}
 
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	slog.SetDefault(logger)
+
 	// Refuse to start with a boundary this host cannot enforce. Validating here
 	// keeps the failure at startup instead of on the first investigation.
+	logger.Info("validating shell runtime")
 	if err := shell.ValidateRuntime(cfg.ExecutorUser, cfg.Limits, cfg.Prlimit); err != nil {
 		return fmt.Errorf("runtime configuration: %w", err)
 	}
+	logger.Info("validating cgroup runtime", "mode", cfg.RuntimeMode)
 	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
 		return fmt.Errorf("cgroup runtime: %w", err)
 	}
@@ -72,12 +77,15 @@ func run() error {
 		AllowNetwork:  cfg.SandboxNetwork,
 		WritablePaths: cfg.AllowedRoots,
 	}
+	logger.Info("validating sandbox runtime", "mode", cfg.SandboxMode)
 	if err := shell.ValidateSandbox(sandbox); err != nil {
 		return fmt.Errorf("sandbox runtime: %w", err)
 	}
-
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
-	slog.SetDefault(logger)
+	logger.Info("runtime boundary validated",
+		"runtime", cfg.RuntimeMode,
+		"sandbox", cfg.SandboxMode,
+		"executor_user", cfg.ExecutorUser,
+	)
 
 	// SIGINT and SIGTERM both mean "stop accepting work and drain".
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

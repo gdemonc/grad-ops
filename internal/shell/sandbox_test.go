@@ -27,7 +27,7 @@ func TestBubblewrapSessionHasNoHostNetworkOrWritableRoot(t *testing.T) {
 		t.Fatalf("new session: %v", err)
 	}
 	result, err := session.Run(context.Background(),
-		`test ! -w /etc && echo root-readonly; test "$(ls /sys/class/net | wc -l)" -eq 1 && echo net-isolated`)
+		`test ! -w /etc && echo root-readonly; test "$(grep -c ':' /proc/net/dev)" -eq 1 && echo net-isolated`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
