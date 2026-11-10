@@ -3,6 +3,7 @@ package shell_test
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -167,6 +168,39 @@ func TestConsoleCloseIsIdempotent(t *testing.T) {
 func TestNewConsoleRejectsUnusableConfig(t *testing.T) {
 	cfg := baseConfig(t)
 	cfg.Timeout = 0
+	if _, err := shell.NewConsole(cfg); !errors.Is(err, shell.ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig, got %v", err)
+	}
+}
+func TestConsoleUsesTheConfiguredScratchDirectory(t *testing.T) {
+	scratch := t.TempDir()
+	cfg := baseConfig(t)
+	cfg.ScratchDir = scratch
+
+	console, err := shell.NewConsole(cfg)
+	if err != nil {
+		t.Fatalf("new console: %v", err)
+	}
+
+	if _, err := console.Run(context.Background(), `printf ok`); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	_ = console.Close()
+
+	// The console removes its scratch directory when it closes, so the
+	// configured directory itself must remain and be empty.
+	entries, err := os.ReadDir(scratch)
+	if err != nil {
+		t.Fatalf("read scratch: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("console left files behind: %v", entries)
+	}
+}
+
+func TestConsoleRejectsMissingScratchDirectory(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.ScratchDir = cfg.WorkDir + string(os.PathSeparator) + "does-not-exist"
 	if _, err := shell.NewConsole(cfg); !errors.Is(err, shell.ErrInvalidConfig) {
 		t.Fatalf("expected ErrInvalidConfig, got %v", err)
 	}

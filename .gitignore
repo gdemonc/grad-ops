@@ -16,9 +16,7 @@ frontend/dist/
 *.test
 /data/
 
-# Local Go caches used by the sandboxed development environment
+# Local Go caches and deployment keys used by the sandboxed environment
 /.gocache/
 /.gopath/
-
-# Local deployment key generated for this sandbox
 /.ssh/

@@ -165,6 +165,7 @@ func run() error {
 			MaxOutputBytes:   cfg.MaxOutputBytes,
 			MaxCalls:         plannerMaxCalls(cfg),
 			PersistentProbes: cfg.PersistentProbes,
+			ScratchDir:       cfg.DataDir,
 			TotalTimeout:     cfg.InvestigationTimeout,
 			RunAs:            cfg.ExecutorUser,
 			Limits:           cfg.Limits,
