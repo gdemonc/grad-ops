@@ -5,6 +5,7 @@ package shell_test
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -41,13 +42,21 @@ func TestValidateCgroupFailsOutsideACgroupHierarchy(t *testing.T) {
 	}
 }
 
-func TestSessionRunsInADedicatedCgroup(t *testing.T) {
-	cfg := baseConfig(t)
-	cfg.Cgroup = shell.CgroupConfig{
+func testCgroupConfig() shell.CgroupConfig {
+	cfg := shell.CgroupConfig{
 		Enabled:        true,
 		MemoryMaxBytes: 64 << 20,
 		PidsMax:        32,
 	}
+	if root := strings.TrimSpace(os.Getenv("GRADOPS_TEST_CGROUP_ROOT")); root != "" {
+		cfg.Root = root
+	}
+	return cfg
+}
+
+func TestSessionRunsInADedicatedCgroup(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.Cgroup = testCgroupConfig()
 	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
 		t.Skipf("no delegated writable cgroup v2 subtree here: %v", err)
 	}
@@ -56,19 +65,23 @@ func TestSessionRunsInADedicatedCgroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
-	result, err := session.Run(context.Background(), "cat /proc/self/cgroup")
+	result, err := session.Run(context.Background(),
+		`path=$(cut -d: -f3 /proc/self/cgroup); printf 'path=%s\n' "$path"; cat "/sys/fs/cgroup$path/memory.max"; cat "/sys/fs/cgroup$path/pids.max"`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if result.ExitCode != 0 || !strings.Contains(result.Stdout, "gradops-") {
 		t.Fatalf("shell did not report a gradops cgroup: stdout=%q stderr=%q", result.Stdout, result.Stderr)
 	}
+	if !strings.Contains(result.Stdout, "67108864") || !strings.Contains(result.Stdout, "32") {
+		t.Fatalf("cgroup limits were not applied: stdout=%q stderr=%q", result.Stdout, result.Stderr)
+	}
 }
 
 func TestCgroupTimeoutKillsTheGroup(t *testing.T) {
 	cfg := baseConfig(t)
 	cfg.Timeout = 150 * time.Millisecond
-	cfg.Cgroup = shell.CgroupConfig{Enabled: true, PidsMax: 32}
+	cfg.Cgroup = testCgroupConfig()
 	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
 		t.Skipf("no delegated writable cgroup v2 subtree here: %v", err)
 	}
