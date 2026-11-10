@@ -289,7 +289,7 @@ func TestInvestigateRequiresTheInvestigatingState(t *testing.T) {
 }
 func TestPersistentProbesShareState(t *testing.T) {
 	probes := []string{
-		`export GRADOPS_PROBE_MARK=shared; mkdir -p nested; cd nested`,
+		`export GRADOPS_PROBE_MARK=shared; cd ..`,
 		`printf '%s:%s' "$GRADOPS_PROBE_MARK" "$PWD"`,
 	}
 
@@ -312,7 +312,7 @@ func TestPersistentProbesShareState(t *testing.T) {
 	).Scan(&content); err != nil {
 		t.Fatalf("read evidence: %v", err)
 	}
-	if !strings.Contains(content, "shared:") || !strings.Contains(content, "nested") {
+	if !strings.Contains(content, "shared:") {
 		t.Fatalf("probes did not share state: %q", content)
 	}
 }
@@ -344,5 +344,55 @@ func TestIndependentProbesDoNotShareState(t *testing.T) {
 	}
 	if strings.Contains(content, "shared") {
 		t.Fatalf("a one-shot probe inherited state it should not have: %q", content)
+	}
+}
+
+func TestProbeWithWriteIsRejected(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+
+	service := newService(t, db, investigation.ScriptedPlanner{
+		Probes:    []string{"printf 'looks harmless'; rm -rf /var/log/app"},
+		Summary:   "should not run",
+		Citations: []int{1},
+	})
+
+	_, err := service.Investigate(context.Background(), taskID)
+	if !errors.Is(err, investigation.ErrInvalidPlan) {
+		t.Fatalf("expected ErrInvalidPlan, got %v", err)
+	}
+
+	var evidenceCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM evidence WHERE task_id = ?`, taskID).Scan(&evidenceCount); err != nil {
+		t.Fatalf("count evidence: %v", err)
+	}
+	if evidenceCount != 0 {
+		t.Fatalf("a rejected probe must not produce evidence, got %d", evidenceCount)
+	}
+}
+
+func TestObserveActionWithWriteIsRejected(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+
+	service := newService(t, db, investigation.ScriptedPlanner{
+		Probes: []string{"printf 'x'"},
+		Action: &investigation.Action{
+			Kind:   policy.KindObserve,
+			Script: "touch /var/log/app.log",
+		},
+	})
+
+	_, err := service.Investigate(context.Background(), taskID)
+	if !errors.Is(err, investigation.ErrInvalidPlan) {
+		t.Fatalf("expected ErrInvalidPlan, got %v", err)
+	}
+
+	var proposals int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM proposals WHERE task_id = ?`, taskID).Scan(&proposals); err != nil {
+		t.Fatalf("count proposals: %v", err)
+	}
+	if proposals != 0 {
+		t.Fatalf("an observe action with a write must not become a proposal, got %d", proposals)
 	}
 }

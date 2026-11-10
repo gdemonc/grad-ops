@@ -3,7 +3,7 @@
 //
 // It is bounded and read-only: every command it runs is a probe, every probe
 // becomes evidence, and a conclusion must cite the probes it rests on. A side
-// effect is never performed here 鈥?at most it is described, priced by policy and
+// effect is never performed here —at most it is described, priced by policy and
 // handed to the approval flow.
 package investigation
 
@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gdemonc/grad-ops/internal/audit"
+	"github.com/gdemonc/grad-ops/internal/command"
 	"github.com/gdemonc/grad-ops/internal/contract"
 	"github.com/gdemonc/grad-ops/internal/domain"
 	"github.com/gdemonc/grad-ops/internal/evidence"
@@ -49,7 +50,35 @@ type Action struct {
 	RunAs         string
 	Reversible    bool
 	Postcondition contract.Postcondition
+	Compensation  *contract.Compensation
 	Rationale     string
+}
+
+// Observation is one probe result as a concluding planner sees it.
+type Observation struct {
+	Index     int
+	Command   string
+	Content   string
+	Truncated bool
+}
+
+// Conclusion is a planner's judgment after it has seen the probes.
+//
+// Citations are 1-based probe numbers, the same numbering the plan uses. The
+// investigation service maps them to stored evidence IDs; a citation that does
+// not identify a probe is refused.
+type Conclusion struct {
+	Summary   string
+	Citations []int
+	Action    *Action
+}
+
+// Concluder is an optional second phase for planners that need to see evidence
+// before drawing a conclusion. A planner that implements it first returns the
+// probes to run, then receives their bounded observations and returns the
+// summary, citations and any proposed action.
+type Concluder interface {
+	Conclude(ctx context.Context, request string, observations []Observation) (Conclusion, error)
 }
 
 // Plan is what a planner asks for.
@@ -103,6 +132,13 @@ type Config struct {
 	// changed directory. Off by default: probes are supposed to be independent
 	// observations unless the operator asks otherwise.
 	PersistentProbes bool
+	// RunAs is the identity probes run as. Empty keeps the service identity.
+	RunAs string
+	// Limits bounds each probe shell process.
+	Limits shell.Limits
+	// TotalTimeout bounds one investigation across every probe and model call.
+	// Zero uses the default.
+	TotalTimeout time.Duration
 }
 
 // Result describes an investigation.
@@ -134,6 +170,12 @@ func New(db *store.DB, engine *policy.Engine, planner Planner, cfg Config) (*Ser
 	if cfg.Timeout <= 0 || cfg.MaxOutputBytes <= 0 || cfg.MaxCalls <= 0 {
 		return nil, fmt.Errorf("%w: runtime limits must be positive", ErrInvalidConfig)
 	}
+	if cfg.TotalTimeout <= 0 {
+		cfg.TotalTimeout = 2 * time.Minute
+	}
+	if cfg.TotalTimeout > 30*time.Minute {
+		return nil, fmt.Errorf("%w: total investigation timeout must not exceed 30m", ErrInvalidConfig)
+	}
 	if cfg.ContractWorkDir == "" {
 		cfg.ContractWorkDir = "/"
 	}
@@ -162,6 +204,12 @@ func (s *Service) Handle(ctx context.Context, job worker.Job) error {
 
 // Investigate runs the plan for a task and records its outcome.
 func (s *Service) Investigate(ctx context.Context, taskID int64) (Result, error) {
+	if s.cfg.TotalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.TotalTimeout)
+		defer cancel()
+	}
+
 	request, err := s.loadRequest(ctx, taskID)
 	if err != nil {
 		return Result{}, err
@@ -174,8 +222,18 @@ func (s *Service) Investigate(ctx context.Context, taskID int64) (Result, error)
 	if len(plan.Probes) == 0 {
 		return Result{}, fmt.Errorf("%w: a plan needs at least one probe", ErrInvalidPlan)
 	}
-	if plan.Action == nil && strings.TrimSpace(plan.Summary) == "" {
+
+	concluder, twoPhase := s.planner.(Concluder)
+	if !twoPhase && plan.Action == nil && strings.TrimSpace(plan.Summary) == "" {
 		return Result{}, fmt.Errorf("%w: a plan without an action needs a conclusion", ErrInvalidPlan)
+	}
+	if err := validateProbes(plan.Probes); err != nil {
+		return Result{}, err
+	}
+	if !twoPhase && plan.Action != nil {
+		if err := validateAction(*plan.Action); err != nil {
+			return Result{}, err
+		}
 	}
 
 	observations, err := s.probe(ctx, plan.Probes)
@@ -190,10 +248,47 @@ func (s *Service) Investigate(ctx context.Context, taskID int64) (Result, error)
 		}
 	}
 
+	if twoPhase {
+		conclusion, err := concluder.Conclude(ctx, request, observationsFrom(plan.Probes, observations))
+		if err != nil {
+			return Result{}, fmt.Errorf("conclude investigation: %w", err)
+		}
+		plan.Summary = conclusion.Summary
+		plan.Citations = conclusion.Citations
+		plan.Action = conclusion.Action
+		if plan.Action == nil && strings.TrimSpace(plan.Summary) == "" {
+			return Result{}, fmt.Errorf("%w: the conclusion is empty", ErrInvalidPlan)
+		}
+	}
+	if plan.Action != nil {
+		if err := validateAction(*plan.Action); err != nil {
+			return Result{}, err
+		}
+	}
+
 	if plan.Action == nil {
 		return s.conclude(ctx, taskID, plan, observations)
 	}
 	return s.propose(ctx, taskID, plan, observations)
+}
+
+// observationsFrom presents the probe results with the same 1-based numbering
+// the plan uses for citations.
+func observationsFrom(probes []string, records []evidence.Record) []Observation {
+	out := make([]Observation, 0, len(records))
+	for index := range records {
+		command := ""
+		if index < len(probes) {
+			command = probes[index]
+		}
+		out = append(out, Observation{
+			Index:     index + 1,
+			Command:   command,
+			Content:   records[index].Content,
+			Truncated: records[index].Truncated,
+		})
+	}
+	return out
 }
 
 func (s *Service) loadRequest(ctx context.Context, taskID int64) (string, error) {
@@ -213,6 +308,38 @@ func (s *Service) loadRequest(ctx context.Context, taskID int64) (string, error)
 		return "", fmt.Errorf("%w: task is %s", ErrWrongState, status)
 	}
 	return request, nil
+}
+
+// validateProbes refuses a script that is declared read-only but has an effect
+// the analyzer can recognize. The analyzer is not a sandbox; it is a cheap
+// second opinion that keeps a planner (or a model) from turning a probe into a
+// write without the approval path noticing.
+func validateProbes(probes []string) error {
+	for index, probe := range probes {
+		analysis, err := command.Analyze(probe)
+		if err != nil {
+			return fmt.Errorf("%w: probe %d cannot be parsed: %v", ErrInvalidPlan, index+1, err)
+		}
+		if !analysis.ReadOnly() {
+			return fmt.Errorf("%w: probe %d is not read-only: %s", ErrInvalidPlan, index+1, analysis.Summary())
+		}
+	}
+	return nil
+}
+
+// validateAction enforces the one declaration the analyzer can check cheaply:
+// an action declared as observation must not contain a recognizable write,
+// indirect execution or dynamic command name. Other kinds are priced by policy
+// and, where required, shown to a human.
+func validateAction(action Action) error {
+	analysis, err := command.Analyze(action.Script)
+	if err != nil {
+		return fmt.Errorf("%w: proposed script cannot be parsed: %v", ErrInvalidPlan, err)
+	}
+	if action.Kind == policy.KindObserve && !analysis.ReadOnly() {
+		return fmt.Errorf("%w: action is declared observe but %s", ErrInvalidPlan, analysis.Summary())
+	}
+	return nil
 }
 
 // probe runs the plan's commands and returns their recordings.
@@ -299,6 +426,17 @@ func (s *Service) conclude(ctx context.Context, taskID int64, plan Plan, records
 func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records []evidence.Record) (Result, error) {
 	action := plan.Action
 
+	// An action may be proposed without citations (the stub path does), but if
+	// the planner did cite probes they must identify evidence saved with this
+	// task. This keeps a model's rationale tied to the observations it saw.
+	var citedIDs []string
+	if len(plan.Citations) > 0 {
+		var err error
+		if citedIDs, err = s.citations(plan, records); err != nil {
+			return Result{}, err
+		}
+	}
+
 	evaluation := s.engine.Evaluate(policy.Request{
 		Subject:    policy.Subject{ID: "investigator"},
 		Kind:       action.Kind,
@@ -332,6 +470,7 @@ func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records 
 		Reversible:    action.Reversible,
 		Runtime:       contract.Runtime{TimeoutMS: s.cfg.Timeout.Milliseconds(), MaxOutputBytes: int64(s.cfg.MaxOutputBytes), MaxCalls: 1},
 		Postcondition: action.Postcondition,
+		Compensation:  action.Compensation,
 		Risk:          string(evaluation.Risk),
 		PolicyVersion: evaluation.PolicyVersion,
 		ApprovalLevel: approvalLevel(evaluation),
@@ -384,6 +523,12 @@ func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records 
 			return fmt.Errorf("proposal id: %w", err)
 		}
 
+		if len(citedIDs) > 0 {
+			if err := s.evidence.VerifyCitations(ctx, tx, taskID, citedIDs); err != nil {
+				return fmt.Errorf("%w: %v", ErrUngrounded, err)
+			}
+		}
+
 		if err := s.transitionTask(ctx, tx, taskID, domain.StatusAwaitingApproval, "", plan.Summary, now); err != nil {
 			return err
 		}
@@ -395,6 +540,7 @@ func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records 
 			"kind":            string(action.Kind),
 			"requires_human":  evaluation.RequiresApproval,
 			"evidence_ids":    result.EvidenceIDs,
+			"cited_ids":       citedIDs,
 		})
 		if err != nil {
 			return fmt.Errorf("encode audit payload: %w", err)
@@ -537,6 +683,8 @@ func (s *Service) probeShell() (probeRunner, func(), error) {
 		Timeout:        s.cfg.Timeout,
 		MaxOutputBytes: s.cfg.MaxOutputBytes,
 		MaxCalls:       s.cfg.MaxCalls,
+		RunAs:          s.cfg.RunAs,
+		Limits:         s.cfg.Limits,
 	}
 
 	if s.cfg.PersistentProbes {
