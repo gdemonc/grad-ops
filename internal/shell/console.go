@@ -51,7 +51,8 @@ type Console struct {
 
 // NewConsole validates cfg and starts a persistent shell.
 func NewConsole(cfg Config) (*Console, error) {
-	if err := validateConfig(cfg); err != nil {
+	cfg, err := prepareConfig(cfg)
+	if err != nil {
 		return nil, err
 	}
 
@@ -59,11 +60,16 @@ func NewConsole(cfg Config) (*Console, error) {
 	if err != nil {
 		return nil, fmt.Errorf("console scratch directory: %w", err)
 	}
+	if err := prepareConsoleDirectory(dir, cfg); err != nil {
+		os.RemoveAll(dir)
+		return nil, err
+	}
 
-	command := exec.Command(cfg.Executable, "--noprofile", "--norc", "-s")
-	command.Dir = cfg.WorkDir
-	command.Env = environ(cfg.Env)
-	configureProcess(command)
+	command, err := newShellCommand(cfg, "--noprofile", "--norc", "-s")
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("prepare console: %w", err)
+	}
 
 	stdin, err := command.StdinPipe()
 	if err != nil {

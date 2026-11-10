@@ -8,9 +8,19 @@ import (
 )
 
 // configureProcess puts the shell in its own process group so that the whole
-// group can be signalled later.
-func configureProcess(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+// group can be signalled later, and applies the configured identity when the
+// process is allowed to switch to it.
+func configureProcess(command *exec.Cmd, cfg Config) error {
+	attr := &syscall.SysProcAttr{Setpgid: true}
+	if cfg.RunAs != "" {
+		credential, err := credentialFor(cfg.RunAs)
+		if err != nil {
+			return err
+		}
+		attr.Credential = credential
+	}
+	command.SysProcAttr = attr
+	return nil
 }
 
 // killProcess terminates the shell and everything it started.

@@ -1,8 +1,8 @@
 // Package shell runs bounded, non-interactive Bash scripts in a controlled
 // environment.
 //
-// A session provides expression 鈥?pipes, redirection, command substitution,
-// multi-line scripts 鈥?and the bookkeeping that keeps it bounded: a per-call
+// A session provides expression —pipes, redirection, command substitution,
+// multi-line scripts —and the bookkeeping that keeps it bounded: a per-call
 // timeout, capped output, and a call budget. It grants no authority. Whether a
 // script may run at all is decided by policy, and what it can touch is bounded
 // by the runtime that starts it.
@@ -51,6 +51,16 @@ type Config struct {
 	MaxOutputBytes int
 	// MaxCalls bounds how many scripts the session may run.
 	MaxCalls int
+	// RunAs is the Linux identity the shell runs as. Empty keeps the service
+	// identity. A non-empty value is resolved and, when the process is allowed
+	// to switch, applied with setuid/setgid before Bash starts.
+	RunAs string
+	// Limits bounds the shell process. Zero fields leave the inherited limit
+	// unchanged. Applying any limit requires Prlimit.
+	Limits Limits
+	// Prlimit is the absolute path of util-linux prlimit. It defaults to
+	// /usr/bin/prlimit when Limits is non-zero.
+	Prlimit string
 }
 
 // Result is the outcome of one call.
@@ -80,7 +90,8 @@ type Session struct {
 
 // NewSession validates cfg and returns a session.
 func NewSession(cfg Config) (*Session, error) {
-	if err := validateConfig(cfg); err != nil {
+	cfg, err := prepareConfig(cfg)
+	if err != nil {
 		return nil, err
 	}
 	return &Session{cfg: cfg}, nil
@@ -161,11 +172,10 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 	callCtx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
 
-	command := exec.Command(s.cfg.Executable, "--noprofile", "--norc", "-c", script)
-	command.Dir = s.cfg.WorkDir
-	command.Env = s.environ()
-	configureProcess(command)
-
+	command, err := newShellCommand(s.cfg, "--noprofile", "--norc", "-c", script)
+	if err != nil {
+		return Result{}, fmt.Errorf("prepare shell: %w", err)
+	}
 	stdout := newCappedBuffer(s.cfg.MaxOutputBytes)
 	stderr := newCappedBuffer(s.cfg.MaxOutputBytes)
 	command.Stdout = stdout

@@ -9,7 +9,9 @@ import "os/exec"
 // signalling and identity enforcement live in the linux-tagged implementation.
 // Nothing here should be read as support for another platform.
 
-func configureProcess(command *exec.Cmd) {}
+func configureProcess(command *exec.Cmd, _ Config) error {
+	return nil
+}
 
 func killProcess(command *exec.Cmd) {
 	if command.Process == nil {
