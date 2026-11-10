@@ -36,11 +36,12 @@ Grad-Ops 是具备通用 Shell 能力、但不把主机权限交给模型的 Lin
 | [核心闭环旧实施计划](docs/plans/2026-10-14-grad-ops-core-loop.md) | Python 版本的历史实现参考 |
 | [测试报告](docs/test-report.md) | 旧 Python 版本的历史测试基线，不等同于 Go 版测试结果 |
 | [测试矩阵与验证现状](docs/testing.md) | Go 版：属性 → 测试对照、运行环境、未覆盖清单 |
+| [Go 版本策略](docs/go-version-policy.md) | 最低兼容版本、开发/CI 工具链、兼容性约束与升级流程 |
 | [systemd 部署](deploy/README.md) | 非 root 账号、unit 加固、安装、验证与当前边界 |
 
 ## 目标技术栈
 
-- Go 后端，REST/JSON API 与持久化 Worker。
+- Go 后端，REST/JSON API 与持久化 Worker；最低 Go 1.26.0，开发/CI 工具链 Go 1.27.3（见 [Go 版本策略](docs/go-version-policy.md)）。
 - SQLite，使用显式迁移、事务和任务租约。
 - 动态 Linux Shell 执行层：以持久 Bash Session 提供通用 Shell 能力；Policy/Approval 控制主机操作权限，受限 Runtime 提供 OS 级隔离、资源预算和进程回收；AST（`mvdan.cc/sh/v3`）作为辅助分析手段。
 - OpenAI 兼容 LLM 客户端；测试使用 `llm.CompleterFunc` 作为离线替身，不需要真实密钥。
@@ -138,6 +139,8 @@ go build -o bin/gradops ./cmd/gradops
 GRADOPS_DB_PATH=./data/gradops.db GRADOPS_ALLOWED_ROOTS=/var/log ./bin/gradops
 go test ./...
 ```
+
+要求 Go 1.26.0 或更高版本；当前开发与 CI 使用 Go 1.27.3。最低版本可以用 `GOTOOLCHAIN=go1.26.0` 复现，策略见 [Go 版本策略](docs/go-version-policy.md)。
 
 Linux 上使用默认值即可；`GRADOPS_BASH` 默认 `/bin/bash`。资源限制默认通过 `/usr/bin/prlimit` 应用；该工具缺失时服务会拒绝启动，而不是静默取消限制。需要以另一个身份运行时，服务本身必须是 root：
 

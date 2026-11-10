@@ -6,7 +6,7 @@
 ## Phase 0：规格冻结
 
 - [x] 将 `docs/specs/2026-10-26-go-linux-core-spec.md` 作为需求基线。
-- [x] 确定首期 Ubuntu LTS 版本与支持的 Go 版本（Ubuntu 26.04.1 LTS 上以 Go 1.27.3 验证；`go.mod` 仍要求 Go 1.26.0 作为语言下限，CI 固化待补）。
+- [x] 确定首期 Ubuntu LTS 版本与支持的 Go 版本（Ubuntu 26.04.1 LTS；最低 Go 1.26.0，开发/CI 工具链 Go 1.27.3，两套工具链均已验证；策略见 `docs/go-version-policy.md`，CI 合并见 #5）。
 - [x] 冻结任务状态机、错误分类、R0-R4 风险规则、Shell Session、Policy/Approval、Action Contract 与 Linux Runtime 边界。
 - [x] 评审任务生命周期与故障恢复设计：`docs/design/task-lifecycle-and-recovery.md`。
 - [x] 评审 Tool 层安全与 Adapter 抽象：`docs/design/tool-layer-and-adapters.md`。

@@ -2,11 +2,15 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3，`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、183 个 `Test` 函数；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、183 个 `Test` 函数；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
 
 ## 如何运行
 
 ```bash
+# 最低兼容版本
+GOTOOLCHAIN=go1.26.0 go build ./... && GOTOOLCHAIN=go1.26.0 go vet ./... && GOTOOLCHAIN=go1.26.0 go test ./... -count=1
+
+# 开发与 CI 工具链
 go build ./... && go vet ./... && go test ./... -count=1
 go test -race ./... -count=1
 ```
@@ -17,6 +21,13 @@ go test -race ./... -count=1
 
 - 测试中的 `GRADOPS_EXECUTOR_USER` 默认未设置，因此身份切换的成功路径没有覆盖；覆盖的是“同一身份可用”和“非 root 无法切换时 fail closed”。
 - 资源限制测试断言 `bash` 内 `ulimit` 看到的值，因此验证的是 prlimit 是否真的把限制传给了 shell，而不是只验证参数被拼接。
+
+## Go 工具链基线
+
+- `go.mod` 的 `go 1.26.0` 是最低兼容版本；
+- 开发与 CI 使用 Go 1.27.3；
+- 两套工具链都在 2026-11-10 验证通过；
+- 变更规则见 [Go 版本策略](go-version-policy.md)。
 
 ## 安全属性 → 测试
 
