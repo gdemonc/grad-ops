@@ -74,4 +74,16 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   fi
 fi
 
+if command -v systemctl >/dev/null 2>&1; then
+  version="$(systemctl --version | awk 'NR == 1 { print $2 }')"
+  case "$version" in
+    ''|*[!0-9]*)
+      fail "could not parse the systemd version"
+      ;;
+  esac
+  if (( version < 254 )); then
+    fail "systemd $version is too old; DelegateSubgroup requires systemd 254+"
+  fi
+fi
+
 echo "deploy check ok"

@@ -7,7 +7,7 @@ adds a service-wide filesystem, privilege and resource boundary.
 
 ## Requirements
 
-- Ubuntu LTS with systemd and util-linux (`prlimit`)
+- Ubuntu LTS with systemd **254+** (`DelegateSubgroup=`), and util-linux (`prlimit`)
 - A built binary: `go build -o bin/gradops ./cmd/gradops`
 - Root access for installation
 
@@ -94,9 +94,11 @@ fresh child cgroup for each shell and writes `memory.max`, `pids.max` and,
 when configured, `cpu.max`. The child is placed in that cgroup at clone time
 with `CLONE_INTO_CGROUP`, so it does not run outside the boundary first.
 
-This requires systemd cgroup delegation: the unit sets `Delegate=yes` and moves
-its own process into `DelegateSubgroup=supervisor`, leaving the delegated base
-empty so controllers can be enabled. The application discovers its base from
+This requires systemd **254+** for `DelegateSubgroup=`. The unit sets
+`Delegate=yes` and moves its own process into `DelegateSubgroup=supervisor`,
+leaving the delegated base empty so controllers can be enabled. At startup the
+service also removes stale `gradops-*` child cgroups left by a previous
+instance; a child that cannot be killed or removed fails startup. The application discovers its base from
 `/proc/self/cgroup` and strips the `supervisor` subgroup. For that reason
 `ProtectControlGroups=no` is used; it is a deliberate tradeoff in exchange for
 writable per-action cgroups. If the delegated subtree is not writable,

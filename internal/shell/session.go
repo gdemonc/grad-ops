@@ -27,6 +27,10 @@ var (
 	ErrBudgetExhausted = errors.New("shell call budget exhausted")
 	// ErrInvalidConfig means the session was configured with unusable values.
 	ErrInvalidConfig = errors.New("invalid shell configuration")
+	// ErrCleanupFailed means the shell's cgroup could not be killed or removed.
+	// The process may have outlived its turn, so callers must not treat the
+	// execution as fully contained.
+	ErrCleanupFailed = errors.New("shell cgroup cleanup failed")
 )
 
 // killGrace bounds how long a killed call may hold its output pipes open before
@@ -178,7 +182,7 @@ func (s *Session) Remaining() int {
 // The script is passed to Bash as a single argument, so it is not word-split or
 // re-interpreted by the caller's shell. Its effects are bounded by the timeout,
 // the output caps and the process control the runtime installed.
-func (s *Session) Run(ctx context.Context, script string) (Result, error) {
+func (s *Session) Run(ctx context.Context, script string) (result Result, runErr error) {
 	if strings.TrimSpace(script) == "" {
 		return Result{}, fmt.Errorf("%w: script must not be empty", ErrInvalidConfig)
 	}
@@ -203,7 +207,11 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare cgroup: %w", err)
 	}
-	defer func() { _ = guard.close() }()
+	defer func() {
+		if closeErr := guard.close(); closeErr != nil {
+			runErr = errors.Join(runErr, closeErr)
+		}
+	}()
 	if err := guard.attach(command); err != nil {
 		return Result{}, fmt.Errorf("attach cgroup: %w", err)
 	}
@@ -228,7 +236,7 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 		timedOut = true
 		// Kill the whole cgroup and process group: a script that backgrounded
 		// work, or escaped its process group, must not outlive its turn.
-		guard.kill()
+		_ = guard.kill()
 		killProcess(command)
 		select {
 		case waitErr = <-waited:
@@ -240,7 +248,7 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 		}
 	}
 
-	result := Result{
+	result = Result{
 		Script:          script,
 		Stdout:          stdout.String(),
 		Stderr:          stderr.String(),

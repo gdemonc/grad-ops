@@ -242,10 +242,20 @@ func (c *Console) Run(ctx context.Context, script string) (Result, error) {
 		return Result{}, fmt.Errorf("read from console: %w", err)
 	case <-callCtx.Done():
 		c.markDead()
-		if c.cgroup != nil {
-			c.cgroup.kill()
-		}
 		killProcess(c.cmd)
+		if c.cgroup != nil {
+			if err := c.cgroup.kill(); err != nil {
+				return Result{
+					Script:   script,
+					ExitCode: -1,
+					Stdout:   c.readCapped(outPath),
+					Stderr:   c.readCapped(errPath),
+					TimedOut: true,
+					Duration: time.Since(started),
+					Call:     call,
+				}, err
+			}
+		}
 		return Result{
 			Script:   script,
 			ExitCode: -1,

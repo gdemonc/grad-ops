@@ -386,10 +386,7 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	summary := "策略、契约、审批、审计与资源限制已生效；无 namespace、cgroup 或文件系统隔离，主机权限边界仍低于目标设计"
-	if overall == "ok" {
-		summary = "全部检查项正常"
-	}
+	summary := safetySummary(info, overall)
 
 	writeJSON(w, http.StatusOK, safetyDTO{
 		OverallStatus: overall,
@@ -456,6 +453,26 @@ func identityDetail(info RuntimeInfo) string {
 	return "未配置 GRADOPS_EXECUTOR_USER：脚本以服务进程身份运行，契约声明的身份不会被实际切换"
 }
 
+func safetySummary(info RuntimeInfo, overall string) string {
+	if overall == "ok" {
+		return "全部检查项正常"
+	}
+
+	parts := []string{"策略、契约、审批与审计已生效"}
+	switch {
+	case info.RuntimeMode == "cgroup-v2" && info.SandboxMode == "bubblewrap":
+		parts = append(parts, "cgroup v2 资源限制与 bubblewrap 命名空间/只读根已启用")
+	case info.RuntimeMode == "cgroup-v2":
+		parts = append(parts, "cgroup v2 资源限制已启用，但没有 namespace/文件系统隔离")
+	case info.SandboxMode == "bubblewrap":
+		parts = append(parts, "bubblewrap 命名空间/只读根已启用，但 cgroup 资源限制未启用")
+	default:
+		parts = append(parts, "cgroup 与 namespace/文件系统隔离均未启用")
+	}
+	parts = append(parts, "仍无 seccomp、网络 allowlist 或 privileged broker")
+	return strings.Join(parts, "；")
+}
+
 func sandboxStatus(info RuntimeInfo) string {
 	if info.SandboxMode == "bubblewrap" {
 		return "ok"
@@ -482,7 +499,10 @@ func isolationDetail(info RuntimeInfo) string {
 		if info.CgroupCPUQuotaMicros > 0 {
 			parts = append(parts, fmt.Sprintf("CPU %d/%d µs", info.CgroupCPUQuotaMicros, info.CgroupCPUPeriodMicros))
 		}
-		return strings.Join(parts, "，") + "；仍无 namespace、文件系统或网络隔离"
+		if info.SandboxMode == "bubblewrap" {
+			parts = append(parts, "bubblewrap namespace/只读根")
+		}
+		return strings.Join(parts, "，") + "；仍无 seccomp、网络 allowlist 或细粒度文件系统策略"
 	}
 
 	limits := []string{}

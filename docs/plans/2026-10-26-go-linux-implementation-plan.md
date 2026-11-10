@@ -39,7 +39,7 @@
 - [x] 引入 Shell AST Parser（`mvdan.cc/sh/v3`）作为辅助分析器：识别写操作、间接执行（`eval`/`bash -c`/`source`/`xargs`/`find -exec`/`awk system()` 等）和动态命令名；探针、`observe` 动作和验证命令在运行前 fail-closed 校验。未把它当作唯一安全边界，也未实现完整 AST 展示。
 - [x] 实现 Action Contract，绑定原始脚本摘要、目标资源、主体/运行身份、隔离配置和预算；AST 摘要仅作为辅助审计字段（未包含 Shell/Runtime 版本字段）。
 - [ ] 实现 Linux Runtime：专用非 root 身份、systemd transient unit/scope 或等效 cgroup、CPU/内存/PID/时间/输出限制、进程组回收。
-  - 已实现：可选的 uid/gid 切换（`GRADOPS_EXECUTOR_USER`，非 root 无法切换时启动失败）、prlimit 资源限制（CPU/地址空间/进程数/文件大小/文件描述符）、进程组回收，以及可选的 per-action cgroup v2（内存/PID/CPU，要求 delegated cgroup）；真实 systemd delegated cgroup 上验证了内存/PID/CPU 限制和超时清理。
+  - 已实现：可选的 uid/gid 切换（`GRADOPS_EXECUTOR_USER`，非 root 无法切换时启动失败）、prlimit 资源限制（CPU/地址空间/进程数/文件大小/文件描述符）、进程组回收，以及可选的 per-action cgroup v2（内存/PID/CPU，要求 delegated cgroup）；真实 systemd delegated cgroup 上验证了内存/PID/CPU 限制和超时清理；cgroup kill/close 错误现在会向上报告，启动时会清理残留的 `gradops-*` 子 cgroup。
   - 已实现并验证：可选的 bubblewrap 沙箱（独立 mount/PID/IPC/UTS/user/network namespace、只读根、可写根绑定），真实 systemd 服务启动探测和 worker 探针通过；默认 `none`，部署示例启用。
   - 未实现：systemd transient scope；cpuset/io 控制器未配置。
 - [x] 调查和操作分离：调查阶段开放必要只读视图；写文件、服务管理、包管理和权限变更进入 Host Operation 授权流程。

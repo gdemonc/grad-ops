@@ -2,7 +2,7 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、204 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针 `SEALED`，`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 通过；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、209 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针 `SEALED`，`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 通过；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
 
 ## 如何运行
 
@@ -81,7 +81,10 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 | API Bearer 认证：健康检查开放、其余路由拒绝缺失/错误 token | `api/auth_test.go`：`TestAPIHealthChecksDoNotRequireAToken`、`TestAPIRequiresTheConfiguredBearerToken`、`TestAPIWithoutATokenRemainsOpen` |
 | 无 token 时禁止非回环监听 | `config/config_test.go`：`TestNonLoopbackRequiresAnAPIToken`、`TestAPITokenAllowsNonLoopback`、`TestShortAPITokenIsRejected`、`TestLocalhostHostnameIsAllowedWithoutAToken` |
 | 整条闭环可用 | `e2e/loop_test.go`：`TestFullLoop` |
-| 部署文件保持非 root 与收紧边界 | `scripts/check-deploy.sh`：非 root、NoNewPrivileges、受限 capability、ProtectSystem/Home、PrivateTmp、Namespaces/SUIDSGID、MemoryMax/TasksMax、`systemd-analyze verify` |
+| cgroup kill/close 错误可观测、启动清理陈旧子 cgroup | `shell/cgroup_error_test.go`：`TestCgroupGuardReportsKillAndRemoveFailures`；`shell/cgroup_stale_test.go`：`TestCleanupStaleCgroupsRemovesOnlyGradopsChildren` |
+| 内存超限与改变 process group 的子进程回收 | `shell/cgroup_test.go`：`TestCgroupMemoryLimitIsEnforced`、`TestCgroupTimeoutKillsAnEscapedProcessGroup`（真实 delegated cgroup 上运行） |
+| Safety API 摘要与实际 runtime 状态一致 | `api/safety_test.go`：`TestSafetySummaryMatchesTheEnabledRuntime` |
+| 部署文件保持非 root 与收紧边界 | `scripts/check-deploy.sh`：非 root、NoNewPrivileges、受限 capability、ProtectSystem/Home、PrivateTmp、Namespaces/SUIDSGID、MemoryMax/TasksMax、systemd 254+、`systemd-analyze verify` |
 
 ## 没有测试覆盖的部分
 

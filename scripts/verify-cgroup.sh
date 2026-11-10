@@ -66,7 +66,7 @@ echo "==> shell integration tests"
   GRADOPS_TEST_CGROUP_CPU_QUOTA_MICROS="$quota" \
   GRADOPS_TEST_CGROUP_CPU_PERIOD_MICROS="$period" \
   "$GO" test ./internal/shell -count=1 -v \
-    -run 'TestSessionRunsInADedicatedCgroup|TestCgroupTimeoutKillsTheGroup|TestCgroupCPUQuotaIsApplied'
+    -run 'TestSessionRunsInADedicatedCgroup|TestCgroupTimeoutKillsTheGroup|TestCgroupCPUQuotaIsApplied|TestCgroupMemoryLimitIsEnforced|TestCgroupTimeoutKillsAnEscapedProcessGroup'
 )
 
 leftover="$(find "$cgroup" -maxdepth 1 -type d -name 'gradops-*' -print)"

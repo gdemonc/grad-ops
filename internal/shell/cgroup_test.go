@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +138,52 @@ func TestCgroupCPUQuotaIsApplied(t *testing.T) {
 	want := fmt.Sprintf("%d %d", quota, period)
 	if result.ExitCode != 0 || !strings.Contains(result.Stdout, want) {
 		t.Fatalf("cpu.max = %q, want %q (stderr=%q)", result.Stdout, want, result.Stderr)
+	}
+}
+
+func TestCgroupMemoryLimitIsEnforced(t *testing.T) {
+	cfg := baseConfig(t)
+	cfg.Timeout = 3 * time.Second
+	cfg.Cgroup = testCgroupConfig()
+	cfg.Cgroup.MemoryMaxBytes = 16 << 20
+	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
+		t.Skipf("no delegated writable cgroup v2 subtree here: %v", err)
+	}
+
+	session, err := shell.NewSession(cfg)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	result, err := session.Run(context.Background(),
+		`set -o pipefail; head -c 67108864 /dev/zero | tr '\0' x >/dev/null`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.ExitCode == 0 && !result.TimedOut {
+		t.Fatalf("a 64 MiB allocation succeeded under a 16 MiB cgroup: %+v", result)
+	}
+}
+
+func TestCgroupTimeoutKillsAnEscapedProcessGroup(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid is not installed")
+	}
+	cfg := baseConfig(t)
+	cfg.Timeout = 200 * time.Millisecond
+	cfg.Cgroup = testCgroupConfig()
+	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
+		t.Skipf("no delegated writable cgroup v2 subtree here: %v", err)
+	}
+
+	session, err := shell.NewSession(cfg)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	result, err := session.Run(context.Background(), `setsid sleep 5 & wait`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !result.TimedOut {
+		t.Fatalf("expected a timeout, got %+v", result)
 	}
 }

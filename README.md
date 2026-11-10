@@ -82,7 +82,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 一次性审批：只存哈希、绑定契约摘要、单条 SQL 原子消费 | 已实现 |
 | Executor：重算摘要、复核策略、原子占用、执行 | 已实现 |
 | Linux 资源限制：CPU、地址空间、进程数、文件大小、文件描述符 | 已实现：通过 `prlimit` 在 shell 启动前应用，默认开启，可逐项设为 `0` 关闭 |
-| per-action cgroup v2 边界 | 已实现并验证：`GRADOPS_RUNTIME=cgroup-v2` 时每个 shell 启动在独立子 cgroup，设置内存/进程/CPU 限制；真实 systemd delegated cgroup 上验证了 `memory.max`、`pids.max`、`cpu.max` 和超时清理。namespace/文件系统/网络隔离仍未实现 |
+| per-action cgroup v2 边界 | 已实现并验证：`GRADOPS_RUNTIME=cgroup-v2` 时每个 shell 启动在独立子 cgroup，设置内存/进程/CPU 限制；真实 systemd delegated cgroup 上验证了 `memory.max`、`pids.max`、`cpu.max` 和超时清理。kill/close 失败会向调用者报告，启动时清理残留的 `gradops-*` 子 cgroup |
 | 执行身份切换 | 部分实现：配置 `GRADOPS_EXECUTOR_USER` 后以该身份运行探针、动作和验证；非 root 无法切换时启动失败。未配置时仍以服务进程身份运行 |
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
@@ -91,7 +91,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | Linux 隔离（systemd、文件系统、网络） | **已实现（可选）**：bubblewrap 沙箱提供 namespace、只读根和默认隔离网络；默认 `.env.example` 为 `none`，部署示例启用 `bubblewrap` |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
 | Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)） |
-| systemd 部署 | 已实现：hardened unit、环境文件、安装脚本和静态检查；已在真实 systemd 主机安装运行，per-action cgroup 验证通过；`ProtectSystem`/`PrivateTmp` 等 unit 边界的逐项运行效果未单独测试 |
+| systemd 部署 | 已实现：hardened unit、环境文件、安装脚本和静态检查；要求 systemd 254+（`DelegateSubgroup`）；已在真实 systemd 主机安装运行，per-action cgroup 验证通过；`ProtectSystem`/`PrivateTmp` 等 unit 边界的逐项运行效果未单独测试 |
 
 ### 已验证 / 未验证
 

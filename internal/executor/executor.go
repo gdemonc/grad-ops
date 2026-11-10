@@ -323,6 +323,11 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 	}
 
 	switch {
+	case runErr != nil && errors.Is(runErr, shell.ErrCleanupFailed):
+		// The script may have completed, but its cgroup could not be killed or
+		// removed. Containment is unproven, so do not report success.
+		outcome.Status = StatusUnknown
+		outcome.Stderr = runErr.Error()
 	case runErr != nil && (ctx.Err() != nil || runCtx.Err() != nil):
 		// The process was interrupted while the script may have been running.
 		outcome.Status = StatusUnknown

@@ -69,7 +69,48 @@ func ValidateCgroup(cfg CgroupConfig) error {
 	if err != nil {
 		return err
 	}
-	return guard.close()
+	if err := guard.close(); err != nil {
+		return err
+	}
+	base, err := cgroupBase(cfg)
+	if err != nil {
+		return err
+	}
+	return cleanupStaleCgroups(base)
+}
+
+// cleanupStaleCgroups removes child cgroups left by a previous service
+// instance. The deployment is single-instance; a stale child means its shell
+// did not get a chance to clean up. Kill first, then remove, and fail startup
+// if a cgroup cannot be released.
+func cleanupStaleCgroups(base string) error {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return fmt.Errorf("%w: list cgroups in %q: %v", ErrCleanupFailed, base, err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "gradops-") {
+			continue
+		}
+		dir := filepath.Join(base, entry.Name())
+		_ = os.WriteFile(filepath.Join(dir, "cgroup.kill"), []byte("1"), 0o644)
+		var removeErr error
+		for attempt := 0; attempt < 100; attempt++ {
+			removeErr = os.Remove(dir)
+			if removeErr == nil || errors.Is(removeErr, os.ErrNotExist) {
+				removeErr = nil
+				break
+			}
+			if !errors.Is(removeErr, syscall.EBUSY) {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if removeErr != nil {
+			return fmt.Errorf("%w: remove stale cgroup %q: %v", ErrCleanupFailed, dir, removeErr)
+		}
+	}
+	return nil
 }
 
 type cgroupGuard struct {
@@ -141,39 +182,49 @@ func (g *cgroupGuard) attach(command *exec.Cmd) error {
 	return nil
 }
 
-func (g *cgroupGuard) kill() {
+func (g *cgroupGuard) kill() error {
 	if g == nil || g.dir == "" {
-		return
+		return nil
 	}
 	// cgroup.kill kills every process in the cgroup, including descendants
-	// that changed process group. It is best-effort; process-group signal is
-	// still sent by the caller.
-	_ = os.WriteFile(filepath.Join(g.dir, "cgroup.kill"), []byte("1"), 0o644)
+	// that changed process group. A failure here means the cgroup may still
+	// contain live processes and must be visible to the caller.
+	if err := os.WriteFile(filepath.Join(g.dir, "cgroup.kill"), []byte("1"), 0o644); err != nil {
+		return fmt.Errorf("%w: kill cgroup %q: %v", ErrCleanupFailed, g.dir, err)
+	}
+	return nil
 }
 
 func (g *cgroupGuard) close() error {
 	if g == nil || g.dir == "" {
 		return nil
 	}
-	g.kill()
+	var errs []error
+	if err := g.kill(); err != nil {
+		errs = append(errs, err)
+	}
 	if g.fd != nil {
 		_ = g.fd.Close()
 		g.fd = nil
 	}
 
-	var err error
+	var removeErr error
 	for attempt := 0; attempt < 100; attempt++ {
-		err = os.Remove(g.dir)
-		if err == nil || errors.Is(err, os.ErrNotExist) {
+		removeErr = os.Remove(g.dir)
+		if removeErr == nil || errors.Is(removeErr, os.ErrNotExist) {
 			g.dir = ""
-			return nil
+			removeErr = nil
+			break
 		}
-		if !errors.Is(err, syscall.EBUSY) {
+		if !errors.Is(removeErr, syscall.EBUSY) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	return fmt.Errorf("remove cgroup %q: %w", g.dir, err)
+	if removeErr != nil {
+		errs = append(errs, fmt.Errorf("%w: remove cgroup %q: %v", ErrCleanupFailed, g.dir, removeErr))
+	}
+	return errors.Join(errs...)
 }
 
 func writeCgroupFile(dir, name string, value int64) error {
