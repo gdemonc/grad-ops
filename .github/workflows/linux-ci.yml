@@ -1,0 +1,53 @@
+name: Linux CI
+
+on:
+  push:
+    branches:
+      - master
+      - feat/phase1-go-skeleton
+  pull_request:
+    branches:
+      - master
+      - feat/phase1-go-skeleton
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build, vet, test (race)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Show toolchain
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
+      - name: Race test
+        run: go test -race ./... -count=1
