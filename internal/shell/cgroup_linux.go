@@ -152,29 +152,28 @@ func newCgroupGuard(cfg CgroupConfig) (*cgroupGuard, error) {
 		return nil, fmt.Errorf("create cgroup %q: %w", dir, err)
 	}
 
-	cleanup := func() {
-		_ = os.Remove(dir)
+	fail := func(cause error) error {
+		if err := os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return errors.Join(cause, fmt.Errorf("%w: remove cgroup %q: %v", ErrCleanupFailed, dir, err))
+		}
+		return cause
 	}
 	if err := writeCgroupFile(dir, "memory.max", cfg.MemoryMaxBytes); err != nil {
-		cleanup()
-		return nil, err
+		return nil, fail(err)
 	}
 	if err := writeCgroupFile(dir, "pids.max", cfg.PidsMax); err != nil {
-		cleanup()
-		return nil, err
+		return nil, fail(err)
 	}
 	if cfg.CPUQuotaMicros > 0 {
 		value := fmt.Sprintf("%d %d", cfg.CPUQuotaMicros, cfg.CPUPeriodMicros)
 		if err := os.WriteFile(filepath.Join(dir, "cpu.max"), []byte(value), 0o644); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("write %s/cpu.max: %w", dir, err)
+			return nil, fail(fmt.Errorf("write %s/cpu.max: %w", dir, err))
 		}
 	}
 
 	fd, err := os.Open(dir)
 	if err != nil {
-		cleanup()
-		return nil, fmt.Errorf("open cgroup %q: %w", dir, err)
+		return nil, fail(fmt.Errorf("open cgroup %q: %w", dir, err))
 	}
 	return &cgroupGuard{dir: dir, fd: fd}, nil
 }
