@@ -2,13 +2,10 @@ import { defineStore } from 'pinia'
 import * as api from '../api'
 import { isTerminalStatus } from '../types'
 import type {
-  ApprovalQueueItem,
-  CreateTaskResult,
-  RunQueueResult,
+  ApprovalItem,
   SafetyReport,
   TaskDetail,
   TaskSummary,
-  TimelineEvent,
 } from '../types'
 
 export const useTasksStore = defineStore('tasks', {
@@ -17,9 +14,7 @@ export const useTasksStore = defineStore('tasks', {
     tasksLoading: false,
     current: null as TaskDetail | null,
     currentLoading: false,
-    timeline: [] as TimelineEvent[],
-    timelineLoading: false,
-    approvals: [] as ApprovalQueueItem[],
+    approvals: [] as ApprovalItem[],
     approvalsLoading: false,
     safetyReport: null as SafetyReport | null,
     safetyLoading: false,
@@ -29,7 +24,7 @@ export const useTasksStore = defineStore('tasks', {
     activeTaskCount(state): number {
       return state.tasks.filter((task) => !isTerminalStatus(task.status)).length
     },
-    pendingApprovals(state): ApprovalQueueItem[] {
+    pendingApprovals(state): ApprovalItem[] {
       return state.approvals.filter((item) => item.status === 'PENDING')
     },
   },
@@ -48,25 +43,28 @@ export const useTasksStore = defineStore('tasks', {
     async fetchTask(id: number) {
       this.currentLoading = true
       try {
-        this.current = await api.getTask(id)
+        // The task, its evidence, its proposals and its outcomes are separate
+        // resources on the server; the console shows them together.
+        const [task, timeline, evidence, proposals, executions, verifications] = await Promise.all([
+          api.getTask(id),
+          api.getTimeline(id),
+          api.getEvidence(id),
+          api.listProposals({ task_id: id }),
+          api.getExecutions(id),
+          api.getVerifications(id),
+        ])
+        const approvals: ApprovalItem[] = []
+        if (proposals.length > 0) {
+          const all = await api.listApprovals(undefined, 200)
+          approvals.push(...all.filter((item) => item.task_id === id))
+        }
+        this.current = { task, timeline, evidence, proposals, approvals, executions, verifications }
         this.lastError = ''
       } catch (err) {
         this.current = null
         this.lastError = api.errorMessage(err)
       } finally {
         this.currentLoading = false
-      }
-    },
-    async fetchTimeline(id: number) {
-      this.timelineLoading = true
-      try {
-        this.timeline = await api.getTimeline(id)
-        this.lastError = ''
-      } catch (err) {
-        this.timeline = []
-        this.lastError = api.errorMessage(err)
-      } finally {
-        this.timelineLoading = false
       }
     },
     async fetchApprovals() {
@@ -93,22 +91,14 @@ export const useTasksStore = defineStore('tasks', {
       }
     },
     async refreshAll() {
-      await Promise.all([
-        this.fetchTasks(),
-        this.fetchApprovals(),
-        this.fetchSafetyReport(),
-      ])
+      await Promise.all([this.fetchTasks(), this.fetchApprovals(), this.fetchSafetyReport()])
     },
-    async submitTask(requestText: string): Promise<CreateTaskResult> {
+    async submitTask(requestText: string): Promise<TaskSummary> {
       const created = await api.createTask(requestText)
-      await api.runQueue().catch(() => undefined)
+      // The durable worker picks the task up on its own; there is no
+      // "run the queue" button to press.
       await this.fetchTasks()
       return created
-    },
-    async runQueueOnce(): Promise<RunQueueResult> {
-      const result = await api.runQueue()
-      await this.fetchTasks()
-      return result
     },
   },
 })

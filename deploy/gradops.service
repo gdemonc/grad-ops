@@ -1,0 +1,49 @@
+[Unit]
+Description=Grad-Ops evidence-constrained operations control plane
+Documentation=file:/usr/share/doc/gradops/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gradops
+Group=gradops
+UMask=0077
+WorkingDirectory=/var/lib/gradops
+StateDirectory=gradops
+EnvironmentFile=-/etc/gradops/gradops.env
+ExecStart=/usr/local/bin/gradops
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillMode=control-group
+
+# Service-level containment. The app still applies prlimit and an optional
+# run-as identity to each shell; this unit keeps the whole process inside a
+# non-root account and a reduced filesystem view.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+# Resource ceilings for the whole service. Per-shell limits remain in
+# GRADOPS_RLIMIT_*; these stop one runaway service from taking the host.
+MemoryMax=1G
+TasksMax=256
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

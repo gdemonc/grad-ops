@@ -1,14 +1,17 @@
 import axios from 'axios'
 import type {
   ApprovalDecisionResult,
-  ApprovalQueueItem,
+  ApprovalItem,
   AuditVerifyResult,
-  CreateTaskResult,
-  RunQueueResult,
+  EvidenceItem,
+  ExecutionItem,
+  ExecutionResult,
+  ProposalItem,
   SafetyReport,
-  TaskDetail,
   TaskSummary,
   TimelineEvent,
+  VerificationItem,
+  VerificationResult,
 } from './types'
 
 const client = axios.create({
@@ -16,34 +19,46 @@ const client = axios.create({
   timeout: 20000,
 })
 
+// A deployment that sets GRADOPS_API_TOKEN can store the same token in this
+// browser key. It is never baked into the bundle by default.
+if (typeof window !== 'undefined') {
+  const token = window.localStorage.getItem('gradops_api_token')
+  if (token) {
+    client.defaults.headers.common.Authorization = `Bearer ${token}`
+  }
+}
+
 export function errorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { detail?: unknown } | undefined
-    if (typeof data?.detail === 'string') return data.detail
-    if (data?.detail !== undefined) return JSON.stringify(data.detail)
+    const data = err.response?.data as { error?: { code?: string; message?: string } } | undefined
+    if (typeof data?.error?.message === 'string' && data.error.message) {
+      return data.error.message
+    }
     if (err.message) return err.message
   }
   if (err instanceof Error && err.message) return err.message
   return '未知错误'
 }
 
-export async function createTask(requestText: string, source = 'web'): Promise<CreateTaskResult> {
-  const { data } = await client.post<CreateTaskResult>('/tasks', {
+// --- tasks -----------------------------------------------------------------
+
+export async function createTask(requestText: string, source = 'web'): Promise<TaskSummary> {
+  const { data } = await client.post<TaskSummary>('/tasks', {
     request_text: requestText,
     source,
   })
   return data
 }
 
-export async function listTasks(status?: string): Promise<TaskSummary[]> {
+export async function listTasks(status?: string, limit?: number): Promise<TaskSummary[]> {
   const { data } = await client.get<TaskSummary[]>('/tasks', {
-    params: status ? { status } : {},
+    params: { status, limit },
   })
   return data
 }
 
-export async function getTask(id: number): Promise<TaskDetail> {
-  const { data } = await client.get<TaskDetail>(`/tasks/${id}`)
+export async function getTask(id: number): Promise<TaskSummary> {
+  const { data } = await client.get<TaskSummary>(`/tasks/${id}`)
   return data
 }
 
@@ -52,49 +67,101 @@ export async function getTimeline(id: number): Promise<TimelineEvent[]> {
   return data
 }
 
-export async function runQueue(): Promise<RunQueueResult> {
-  const { data } = await client.post<RunQueueResult>('/tasks/run')
+export async function getEvidence(id: number): Promise<EvidenceItem[]> {
+  const { data } = await client.get<EvidenceItem[]>(`/tasks/${id}/evidence`)
   return data
 }
 
-export async function listApprovals(status = 'PENDING'): Promise<ApprovalQueueItem[]> {
-  const { data } = await client.get<ApprovalQueueItem[]>('/approvals', {
-    params: { status },
+export async function getExecutions(id: number): Promise<ExecutionItem[]> {
+  const { data } = await client.get<ExecutionItem[]>(`/tasks/${id}/executions`)
+  return data
+}
+
+export async function getVerifications(id: number): Promise<VerificationItem[]> {
+  const { data } = await client.get<VerificationItem[]>(`/tasks/${id}/verifications`)
+  return data
+}
+
+export async function verifyTask(id: number): Promise<VerificationResult> {
+  const { data } = await client.post<VerificationResult>(`/tasks/${id}/verify`)
+  return data
+}
+
+export async function recoverTask(id: number): Promise<ExecutionResult> {
+  const { data } = await client.post<ExecutionResult>(`/tasks/${id}/recover`)
+  return data
+}
+
+// --- proposals and approvals ------------------------------------------------
+
+export async function listProposals(params: {
+  task_id?: number
+  status?: string
+}): Promise<ProposalItem[]> {
+  const { data } = await client.get<ProposalItem[]>('/proposals', { params })
+  return data
+}
+
+export async function getProposal(id: number): Promise<ProposalItem> {
+  const { data } = await client.get<ProposalItem>(`/proposals/${id}`)
+  return data
+}
+
+export async function listApprovals(
+  status?: string,
+  limit?: number,
+): Promise<ApprovalItem[]> {
+  const { data } = await client.get<ApprovalItem[]>('/approvals', {
+    params: { status, limit },
   })
   return data
 }
 
-export async function approveApproval(
-  approvalId: number,
+/** Approving returns the one-time token; it is never retrievable afterwards. */
+export async function approveProposal(
+  proposalId: number,
+  approver: string,
   comment: string,
 ): Promise<ApprovalDecisionResult> {
   const { data } = await client.post<ApprovalDecisionResult>(
-    `/approvals/${approvalId}/approve`,
-    { comment },
+    `/proposals/${proposalId}/approvals`,
+    { approver, comment, decision: 'APPROVED' },
   )
   return data
 }
 
-export async function rejectApproval(
-  approvalId: number,
+export async function rejectProposal(
+  proposalId: number,
+  approver: string,
   comment: string,
 ): Promise<ApprovalDecisionResult> {
   const { data } = await client.post<ApprovalDecisionResult>(
-    `/approvals/${approvalId}/reject`,
-    { comment },
+    `/proposals/${proposalId}/approvals`,
+    { approver, comment, decision: 'REJECTED' },
   )
   return data
 }
 
-export async function verifyAudit(traceId: string, full = false): Promise<AuditVerifyResult> {
-  const { data } = await client.get<AuditVerifyResult>(
-    `/audit/${encodeURIComponent(traceId)}/verify`,
-    { params: { full } },
+export async function executeProposal(
+  proposalId: number,
+  token: string,
+  actor = 'console',
+): Promise<ExecutionResult> {
+  const { data } = await client.post<ExecutionResult>(
+    `/proposals/${proposalId}/execute`,
+    { token, actor },
   )
+  return data
+}
+
+// --- integrity ---------------------------------------------------------------
+
+export async function verifyAudit(): Promise<AuditVerifyResult> {
+  const { data } = await client.get<AuditVerifyResult>('/audit/verify')
   return data
 }
 
 export async function getSafetyReport(): Promise<SafetyReport> {
-  const { data } = await client.get<SafetyReport>('/safety/report')
+  const { data } = await client.get<SafetyReport>('/safety')
   return data
 }

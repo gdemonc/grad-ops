@@ -1,0 +1,8 @@
+# Shell scripts must keep LF endings: a CRLF shebang fails on Linux.
+*.sh text eol=lf
+
+# Go and Markdown are normalised in the repository; the working tree may use
+# whatever the platform prefers.
+*.go text
+*.md text
+*.sql text

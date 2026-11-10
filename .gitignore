@@ -9,3 +9,14 @@ node_modules/
 dist/
 frontend/node_modules/
 frontend/dist/
+
+# Go build output and local service data
+/gradops
+/gradops.exe
+*.test
+/data/
+
+# Local Go caches and deployment keys used by the sandboxed environment
+/.gocache/
+/.gopath/
+/.ssh/

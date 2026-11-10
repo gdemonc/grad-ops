@@ -148,8 +148,8 @@ R0-R4 风险等级继续保留为决策结果：
 - Agent 可以通过通用 Bash Session 组合常见 Linux 命令、管道、重定向、条件连接和脚本完成调查。
 - Shell Session 不继承主服务秘密，不持有任意 sudo/root 权限。
 - Policy 对主体、目标资源、副作用和风险作确定性判断；模型自报风险不能改变决策。
-- AST 可提供结构化展示与风险提示，但不作为唯一安全边界。
-- systemd/cgroup 等 Runtime 限制时间、CPU、内存、PID、输出和进程回收；实际生效配置有集成测试。
+- AST 可提供结构化展示与风险提示，但不作为唯一安全边界。（当前已实现写操作/间接执行/动态命令名的辅助分析，并用于探针、`observe` 动作与验证命令的只读性校验；尚未实现完整的命令结构展示。）
+- systemd/cgroup 等 Runtime 限制时间、CPU、内存、PID、输出和进程回收；实际生效配置有集成测试。（当前实现 prlimit 的 CPU/地址空间/进程数/文件大小/fd 限制与可选 uid 切换，并提供 hardened systemd unit 的服务级边界；per-action systemd/cgroup 尚未实现，unit 也未在真实 systemd 主机验证）
 - 文件和网络访问按调查/操作场景施加边界；越界操作被阻断。
 - 高权限操作通过独立、窄接口的 privileged broker/helper，不通过任意 sudo。
 - Action Contract 绑定脚本、目标、身份、预算和 Runtime 配置；关键字段变化触发重新评估。
