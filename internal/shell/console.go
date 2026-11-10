@@ -145,10 +145,16 @@ func (c *Console) Close() error {
 	c.dead = true
 	c.mu.Unlock()
 
+	var errs []error
+	closeStdin := func() {
+		if err := c.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			errs = append(errs, fmt.Errorf("%w: close console stdin: %v", ErrCleanupFailed, err))
+		}
+	}
 	if !dead {
 		// Sending EOF makes Bash exit on its own terms; a shell that ignores it
 		// is killed, and the wait below is what actually reaps it.
-		_ = c.stdin.Close()
+		closeStdin()
 		select {
 		case <-c.waited:
 		case <-time.After(killGrace):
@@ -158,18 +164,19 @@ func (c *Console) Close() error {
 			<-c.waited
 		}
 	} else {
-		_ = c.stdin.Close()
+		closeStdin()
 	}
 
-	var closeErr error
 	if c.cgroup != nil {
-		closeErr = c.cgroup.close()
+		if err := c.cgroup.close(); err != nil {
+			errs = append(errs, err)
+		}
 		c.cgroup = nil
 	}
-	if err := os.RemoveAll(c.dir); err != nil && closeErr == nil {
-		closeErr = err
+	if err := os.RemoveAll(c.dir); err != nil {
+		errs = append(errs, fmt.Errorf("%w: remove console dir %q: %v", ErrCleanupFailed, c.dir, err))
 	}
-	return closeErr
+	return errors.Join(errs...)
 }
 
 // Run executes one script in the persistent shell.
