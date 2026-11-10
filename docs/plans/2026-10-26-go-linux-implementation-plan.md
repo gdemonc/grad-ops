@@ -39,8 +39,8 @@
 - [x] 引入 Shell AST Parser（`mvdan.cc/sh/v3`）作为辅助分析器：识别写操作、间接执行（`eval`/`bash -c`/`source`/`xargs`/`find -exec`/`awk system()` 等）和动态命令名；探针、`observe` 动作和验证命令在运行前 fail-closed 校验。未把它当作唯一安全边界，也未实现完整 AST 展示。
 - [x] 实现 Action Contract，绑定原始脚本摘要、目标资源、主体/运行身份、隔离配置和预算；AST 摘要仅作为辅助审计字段（未包含 Shell/Runtime 版本字段）。
 - [ ] 实现 Linux Runtime：专用非 root 身份、systemd transient unit/scope 或等效 cgroup、CPU/内存/PID/时间/输出限制、进程组回收。
-  - 已实现：可选的 uid/gid 切换（`GRADOPS_EXECUTOR_USER`，非 root 无法切换时启动失败）、prlimit 资源限制（CPU/地址空间/进程数/文件大小/文件描述符）、进程组回收。
-  - 未实现：namespace、cgroup、systemd 单元、文件系统与网络隔离。
+  - 已实现：可选的 uid/gid 切换（`GRADOPS_EXECUTOR_USER`，非 root 无法切换时启动失败）、prlimit 资源限制（CPU/地址空间/进程数/文件大小/文件描述符）、进程组回收，以及可选的 per-action cgroup v2（内存/PID/CPU，要求 delegated cgroup）。
+  - 未实现：per-action namespace、文件系统与网络隔离；systemd transient scope 未采用；cgroup 未在真实 systemd 服务验证。
 - [x] 调查和操作分离：调查阶段开放必要只读视图；写文件、服务管理、包管理和权限变更进入 Host Operation 授权流程。
 - [ ] 高权限操作经独立、窄接口、可审计的 privileged broker/helper；不把 Agent 加入 sudo 组，不向 Bash Session 暴露任意 sudo。
 - [ ] 评估文件系统与网络隔离的首期可行配置；Landlock、Bubblewrap、AppArmor/seccomp 按需增强，不要求首期全部引入。

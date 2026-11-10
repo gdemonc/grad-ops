@@ -67,7 +67,10 @@ The unit uses:
 - `ProtectSystem=full` (read-only `/usr`, `/boot`, `/etc`)
 - `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`
 - `NoNewPrivileges=yes`, empty `CapabilityBoundingSet`
-- `ProtectKernelTunables/Modules/Logs/ControlGroups/Clock/Hostname=yes`
+- `ProtectKernelTunables/Modules/Logs/Clock/Hostname=yes`
+- `Delegate=yes`, `DelegateSubgroup=supervisor` and
+  `ProtectControlGroups=no` so the service's own PID is outside the delegated
+  base cgroup and the service can create one child cgroup per shell
 - `RestrictNamespaces=yes`, `RestrictSUIDSGID=yes`, `RestrictRealtime=yes`
 - `MemoryMax=1G`, `TasksMax=256`, `LimitNOFILE=1024`
 - `KillMode=control-group` so stopping the service also stops shell children
@@ -78,8 +81,24 @@ declared actions under `/var/log` and because the SQLite database lives under
 the application-level boundary. A stricter `ProtectSystem=strict` deployment
 must add explicit `ReadWritePaths=` for every writable target.
 
-The unit does not create a cgroup per action, does not add a network namespace,
-and does not make `/var/log` read-only. Those remain open work.
+## Per-action cgroup v2
+
+`gradops.env.example` enables `GRADOPS_RUNTIME=cgroup-v2`. The service creates a
+fresh child cgroup for each shell and writes `memory.max`, `pids.max` and,
+when configured, `cpu.max`. The child is placed in that cgroup at clone time
+with `CLONE_INTO_CGROUP`, so it does not run outside the boundary first.
+
+This requires systemd cgroup delegation: the unit sets `Delegate=yes`. For that
+reason `ProtectControlGroups=no` is used; it is a deliberate tradeoff in exchange
+for writable per-action cgroups. If the delegated subtree is not writable,
+startup fails instead of falling back to `direct`.
+
+The integration test for a real delegated cgroup skips when the host's cgroup
+subtree is not writable. The unit and this path have not yet been installed and
+validated on a real systemd host.
+
+The unit still does not add a network or mount namespace and does not make
+`/var/log` read-only. Those remain open work.
 
 ## Verify
 

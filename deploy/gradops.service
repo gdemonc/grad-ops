@@ -31,7 +31,11 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
-ProtectControlGroups=yes
+# The service creates a child cgroup per shell. systemd must delegate the
+# subtree, and the cgroup hierarchy must be writable for that delegation.
+Delegate=yes
+DelegateSubgroup=supervisor
+ProtectControlGroups=no
 ProtectClock=yes
 ProtectHostname=yes
 RestrictNamespaces=yes
