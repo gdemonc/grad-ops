@@ -38,6 +38,7 @@ type Console struct {
 
 	dir    string
 	cmd    *exec.Cmd
+	cgroup *cgroupGuard
 	stdin  io.WriteCloser
 	reader *bufio.Reader
 	diag   *cappedBuffer
@@ -70,14 +71,26 @@ func NewConsole(cfg Config) (*Console, error) {
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("prepare console: %w", err)
 	}
+	guard, err := newCgroupGuard(cfg.Cgroup)
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("prepare console cgroup: %w", err)
+	}
+	if err := guard.attach(command); err != nil {
+		_ = guard.close()
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("attach console cgroup: %w", err)
+	}
 
 	stdin, err := command.StdinPipe()
 	if err != nil {
+		_ = guard.close()
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("console stdin: %w", err)
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
+		_ = guard.close()
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("console stdout: %w", err)
 	}
@@ -85,6 +98,7 @@ func NewConsole(cfg Config) (*Console, error) {
 	command.Stderr = diag
 
 	if err := command.Start(); err != nil {
+		_ = guard.close()
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("start console: %w", err)
 	}
@@ -93,6 +107,7 @@ func NewConsole(cfg Config) (*Console, error) {
 		cfg:    cfg,
 		dir:    dir,
 		cmd:    command,
+		cgroup: guard,
 		stdin:  stdin,
 		reader: bufio.NewReaderSize(stdout, 4096),
 		diag:   diag,
@@ -144,8 +159,15 @@ func (c *Console) Close() error {
 		_ = c.stdin.Close()
 	}
 
-	os.RemoveAll(c.dir)
-	return nil
+	var closeErr error
+	if c.cgroup != nil {
+		closeErr = c.cgroup.close()
+		c.cgroup = nil
+	}
+	if err := os.RemoveAll(c.dir); err != nil && closeErr == nil {
+		closeErr = err
+	}
+	return closeErr
 }
 
 // Run executes one script in the persistent shell.
@@ -220,6 +242,9 @@ func (c *Console) Run(ctx context.Context, script string) (Result, error) {
 		return Result{}, fmt.Errorf("read from console: %w", err)
 	case <-callCtx.Done():
 		c.markDead()
+		if c.cgroup != nil {
+			c.cgroup.kill()
+		}
 		killProcess(c.cmd)
 		return Result{
 			Script:   script,

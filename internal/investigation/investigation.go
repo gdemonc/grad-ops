@@ -139,6 +139,8 @@ type Config struct {
 	RunAs string
 	// Limits bounds each probe shell process.
 	Limits shell.Limits
+	// Cgroup is the optional cgroup v2 boundary for probe shells.
+	Cgroup shell.CgroupConfig
 	// TotalTimeout bounds one investigation across every probe and model call.
 	// Zero uses the default.
 	TotalTimeout time.Duration
@@ -689,6 +691,7 @@ func (s *Service) probeShell() (probeRunner, func(), error) {
 		ScratchDir:     s.cfg.ScratchDir,
 		RunAs:          s.cfg.RunAs,
 		Limits:         s.cfg.Limits,
+		Cgroup:         s.cfg.Cgroup,
 	}
 
 	if s.cfg.PersistentProbes {

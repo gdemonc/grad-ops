@@ -114,6 +114,7 @@ type Service struct {
 	runAs            string
 	limits           shell.Limits
 	executionTimeout time.Duration
+	cgroup           shell.CgroupConfig
 }
 
 // Config is the executor's fixed configuration.
@@ -136,6 +137,8 @@ type Config struct {
 	// ExecutionTimeout is an emergency ceiling on one execution, on top of the
 	// contract's own runtime timeout. Zero uses the default.
 	ExecutionTimeout time.Duration
+	// Cgroup is the optional cgroup v2 boundary for the action shell.
+	Cgroup shell.CgroupConfig
 }
 
 // New builds a service.
@@ -160,6 +163,7 @@ func New(db *store.DB, engine *policy.Engine, approvals *approval.Service, ev *e
 		runAs:             strings.TrimSpace(cfg.RunAs),
 		limits:            cfg.Limits,
 		executionTimeout:  cfg.ExecutionTimeout,
+		cgroup:            cfg.Cgroup,
 	}
 	if service.executionTimeout <= 0 {
 		service.executionTimeout = 2 * time.Minute
@@ -599,6 +603,7 @@ func (s *Service) session(c contract.Contract) (*shell.Session, error) {
 		MaxCalls:       int(c.Runtime.MaxCalls),
 		RunAs:          s.runAs,
 		Limits:         s.limits,
+		Cgroup:         s.cgroup,
 	})
 }
 

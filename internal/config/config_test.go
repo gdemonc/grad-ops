@@ -236,3 +236,45 @@ func TestExecutionTimeoutDefaultsAndParses(t *testing.T) {
 		t.Fatal("expected zero to be rejected")
 	}
 }
+
+func TestRuntimeModeDefaultsToDirect(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.RuntimeMode != "direct" || cfg.Cgroup.Enabled {
+		t.Fatalf("runtime = %q cgroup enabled = %t", cfg.RuntimeMode, cfg.Cgroup.Enabled)
+	}
+}
+
+func TestCgroupRuntimeParsesLimits(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{
+		"GRADOPS_RUNTIME":                  "cgroup-v2",
+		"GRADOPS_CGROUP_MEMORY_MAX_BYTES":  "268435456",
+		"GRADOPS_CGROUP_PIDS_MAX":          "32",
+		"GRADOPS_CGROUP_CPU_QUOTA_MICROS":  "50000",
+		"GRADOPS_CGROUP_CPU_PERIOD_MICROS": "100000",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.RuntimeMode != "cgroup-v2" || !cfg.Cgroup.Enabled {
+		t.Fatalf("runtime = %q cgroup enabled = %t", cfg.RuntimeMode, cfg.Cgroup.Enabled)
+	}
+	if cfg.Cgroup.MemoryMaxBytes != 268435456 || cfg.Cgroup.PidsMax != 32 ||
+		cfg.Cgroup.CPUQuotaMicros != 50000 || cfg.Cgroup.CPUPeriodMicros != 100000 {
+		t.Fatalf("unexpected cgroup config: %+v", cfg.Cgroup)
+	}
+}
+
+func TestRuntimeModeRejectsUnknownValues(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{"GRADOPS_RUNTIME": "namespace"}); err == nil {
+		t.Fatal("expected an unknown runtime mode to be rejected")
+	}
+}
+
+func TestCgroupLimitsRejectNegativeValues(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{"GRADOPS_CGROUP_MEMORY_MAX_BYTES": "-1"}); err == nil {
+		t.Fatal("expected a negative cgroup limit to be rejected")
+	}
+}

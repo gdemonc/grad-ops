@@ -66,6 +66,9 @@ type Config struct {
 	// Prlimit is the absolute path of util-linux prlimit. It defaults to
 	// /usr/bin/prlimit when Limits is non-zero.
 	Prlimit string
+	// Cgroup, when enabled, starts the shell in a fresh cgroup v2 child with
+	// memory, process and CPU limits.
+	Cgroup CgroupConfig
 }
 
 // Result is the outcome of one call.
@@ -135,6 +138,9 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("%w: scratch directory %q is not a directory", ErrInvalidConfig, cfg.ScratchDir)
 		}
 	}
+	if err := cfg.Cgroup.validate(); err != nil {
+		return err
+	}
 	for key := range cfg.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") {
 			return fmt.Errorf("%w: invalid environment key %q", ErrInvalidConfig, key)
@@ -187,6 +193,14 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare shell: %w", err)
 	}
+	guard, err := newCgroupGuard(s.cfg.Cgroup)
+	if err != nil {
+		return Result{}, fmt.Errorf("prepare cgroup: %w", err)
+	}
+	defer func() { _ = guard.close() }()
+	if err := guard.attach(command); err != nil {
+		return Result{}, fmt.Errorf("attach cgroup: %w", err)
+	}
 	stdout := newCappedBuffer(s.cfg.MaxOutputBytes)
 	stderr := newCappedBuffer(s.cfg.MaxOutputBytes)
 	command.Stdout = stdout
@@ -206,8 +220,9 @@ func (s *Session) Run(ctx context.Context, script string) (Result, error) {
 	case waitErr = <-waited:
 	case <-callCtx.Done():
 		timedOut = true
-		// Kill the whole group, not just the shell: a script that backgrounded
-		// work must not outlive its turn.
+		// Kill the whole cgroup and process group: a script that backgrounded
+		// work, or escaped its process group, must not outlive its turn.
+		guard.kill()
 		killProcess(command)
 		select {
 		case waitErr = <-waited:

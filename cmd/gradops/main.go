@@ -63,6 +63,9 @@ func run() error {
 	if err := shell.ValidateRuntime(cfg.ExecutorUser, cfg.Limits, cfg.Prlimit); err != nil {
 		return fmt.Errorf("runtime configuration: %w", err)
 	}
+	if err := shell.ValidateCgroup(cfg.Cgroup); err != nil {
+		return fmt.Errorf("cgroup runtime: %w", err)
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
@@ -132,6 +135,7 @@ func run() error {
 		RequireRunAsMatch: cfg.RequireRunAsMatch,
 		RunAs:             cfg.ExecutorUser,
 		Limits:            cfg.Limits,
+		Cgroup:            cfg.Cgroup,
 		ExecutionTimeout:  cfg.ExecutionTimeout,
 	}, executor.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
@@ -144,6 +148,7 @@ func run() error {
 		Timeout: cfg.ProbeTimeout,
 		RunAs:   cfg.ExecutorUser,
 		Limits:  cfg.Limits,
+		Cgroup:  cfg.Cgroup,
 	}, verify.WithWorkDirMapper(mapWorkDir))
 	if err != nil {
 		return fmt.Errorf("build verifier: %w", err)
@@ -169,6 +174,7 @@ func run() error {
 			TotalTimeout:     cfg.InvestigationTimeout,
 			RunAs:            cfg.ExecutorUser,
 			Limits:           cfg.Limits,
+			Cgroup:           cfg.Cgroup,
 		})
 	if err != nil {
 		return fmt.Errorf("build investigation: %w", err)
@@ -203,23 +209,28 @@ func run() error {
 		MaxRequestBytes: cfg.MaxRequestBytes,
 		APIToken:        cfg.APIToken,
 		Runtime: api.RuntimeInfo{
-			Bash:              cfg.Bash,
-			WorkDir:           cfg.WorkDir,
-			ContractWorkDir:   cfg.ContractWorkDir,
-			AllowedRoots:      cfg.AllowedRoots,
-			PolicyVersion:     cfg.PolicyVersion,
-			ApprovalTTLMS:     cfg.ApprovalTTL.Milliseconds(),
-			WorkerEnabled:     cfg.EnableWorker,
-			RequireRunAsMatch: cfg.RequireRunAsMatch,
-			PersistentProbes:  cfg.PersistentProbes,
-			ExecutorUser:      cfg.ExecutorUser,
-			CPULimitMS:        cfg.Limits.CPU.Milliseconds(),
-			AddressSpaceBytes: cfg.Limits.AddressSpaceBytes,
-			ProcessLimit:      cfg.Limits.MaxProcesses,
-			FileSizeBytes:     cfg.Limits.MaxFileSizeBytes,
-			OpenFileLimit:     cfg.Limits.MaxOpenFiles,
-			Planner:           cfg.Planner,
-			APITokenSet:       cfg.APIToken != "",
+			Bash:                  cfg.Bash,
+			WorkDir:               cfg.WorkDir,
+			ContractWorkDir:       cfg.ContractWorkDir,
+			AllowedRoots:          cfg.AllowedRoots,
+			PolicyVersion:         cfg.PolicyVersion,
+			ApprovalTTLMS:         cfg.ApprovalTTL.Milliseconds(),
+			WorkerEnabled:         cfg.EnableWorker,
+			RequireRunAsMatch:     cfg.RequireRunAsMatch,
+			PersistentProbes:      cfg.PersistentProbes,
+			ExecutorUser:          cfg.ExecutorUser,
+			CPULimitMS:            cfg.Limits.CPU.Milliseconds(),
+			AddressSpaceBytes:     cfg.Limits.AddressSpaceBytes,
+			ProcessLimit:          cfg.Limits.MaxProcesses,
+			FileSizeBytes:         cfg.Limits.MaxFileSizeBytes,
+			OpenFileLimit:         cfg.Limits.MaxOpenFiles,
+			Planner:               cfg.Planner,
+			RuntimeMode:           cfg.RuntimeMode,
+			CgroupMemoryMaxBytes:  cfg.Cgroup.MemoryMaxBytes,
+			CgroupPidsMax:         cfg.Cgroup.PidsMax,
+			CgroupCPUQuotaMicros:  cfg.Cgroup.CPUQuotaMicros,
+			CgroupCPUPeriodMicros: cfg.Cgroup.CPUPeriodMicros,
+			APITokenSet:           cfg.APIToken != "",
 		},
 	})
 

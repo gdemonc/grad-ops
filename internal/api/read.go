@@ -39,6 +39,13 @@ type RuntimeInfo struct {
 	OpenFileLimit     int64 `json:"open_file_limit"`
 	// Planner names the investigation planner: stub or model.
 	Planner string `json:"planner"`
+	// RuntimeMode is direct or cgroup-v2.
+	RuntimeMode string `json:"runtime_mode"`
+	// Cgroup limits, when RuntimeMode is cgroup-v2.
+	CgroupMemoryMaxBytes  int64 `json:"cgroup_memory_max_bytes"`
+	CgroupPidsMax         int64 `json:"cgroup_pids_max"`
+	CgroupCPUQuotaMicros  int64 `json:"cgroup_cpu_quota_micros"`
+	CgroupCPUPeriodMicros int64 `json:"cgroup_cpu_period_micros"`
 	// APITokenSet reports whether /api requires a bearer token.
 	APITokenSet bool `json:"api_token_set"`
 }
@@ -446,6 +453,20 @@ func identityDetail(info RuntimeInfo) string {
 }
 
 func isolationDetail(info RuntimeInfo) string {
+	if info.RuntimeMode == "cgroup-v2" {
+		parts := []string{"cgroup v2 已启用"}
+		if info.CgroupMemoryMaxBytes > 0 {
+			parts = append(parts, fmt.Sprintf("内存 %d MiB", info.CgroupMemoryMaxBytes>>20))
+		}
+		if info.CgroupPidsMax > 0 {
+			parts = append(parts, fmt.Sprintf("进程 %d", info.CgroupPidsMax))
+		}
+		if info.CgroupCPUQuotaMicros > 0 {
+			parts = append(parts, fmt.Sprintf("CPU %d/%d µs", info.CgroupCPUQuotaMicros, info.CgroupCPUPeriodMicros))
+		}
+		return strings.Join(parts, "，") + "；仍无 namespace、文件系统或网络隔离"
+	}
+
 	limits := []string{}
 	if info.CPULimitMS > 0 {
 		limits = append(limits, fmt.Sprintf("CPU %s", (time.Duration(info.CPULimitMS)*time.Millisecond).String()))

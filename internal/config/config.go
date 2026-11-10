@@ -38,6 +38,12 @@ const (
 	envProbeConsole    = "GRADOPS_PROBE_CONSOLE"
 	envInvestigation   = "GRADOPS_INVESTIGATION_TIMEOUT"
 	envExecution       = "GRADOPS_EXECUTION_TIMEOUT"
+	envRuntime         = "GRADOPS_RUNTIME"
+	envCgroupRoot      = "GRADOPS_CGROUP_ROOT"
+	envCgroupMemory    = "GRADOPS_CGROUP_MEMORY_MAX_BYTES"
+	envCgroupPids      = "GRADOPS_CGROUP_PIDS_MAX"
+	envCgroupCPUQuota  = "GRADOPS_CGROUP_CPU_QUOTA_MICROS"
+	envCgroupCPUPeriod = "GRADOPS_CGROUP_CPU_PERIOD_MICROS"
 	envAPIToken        = "GRADOPS_API_TOKEN"
 	envExecutorUser    = "GRADOPS_EXECUTOR_USER"
 	envPrlimit         = "GRADOPS_PRLIMIT"
@@ -66,6 +72,10 @@ const (
 	defaultProbe         = 10 * time.Second
 	defaultInvestigation = 5 * time.Minute
 	defaultExecution     = 5 * time.Minute
+	defaultRuntime       = "direct"
+	defaultCgroupMemory  = 512 << 20
+	defaultCgroupPids    = 256
+	defaultCgroupPeriod  = 100_000
 	defaultMaxOutput     = 64 << 10
 	defaultPrlimit       = "/usr/bin/prlimit"
 	maxBodyLimit         = 8 << 20
@@ -140,6 +150,10 @@ type Config struct {
 	// ExecutionTimeout bounds one approved action's execution. It is an
 	// emergency ceiling on top of the contract's own runtime timeout.
 	ExecutionTimeout time.Duration
+	// RuntimeMode selects the per-shell Linux runtime: direct or cgroup-v2.
+	RuntimeMode string
+	// Cgroup configures the cgroup v2 boundary when RuntimeMode is cgroup-v2.
+	Cgroup shell.CgroupConfig
 	// ExecutorUser is the Linux identity that probes, actions and verification
 	// run as. Empty keeps the service identity; otherwise every shell must
 	// actually assume this identity or startup fails.
@@ -184,10 +198,17 @@ func Load() (Config, error) {
 		ProbeTimeout:         defaultProbe,
 		InvestigationTimeout: defaultInvestigation,
 		ExecutionTimeout:     defaultExecution,
-		MaxOutputBytes:       defaultMaxOutput,
-		EnableWorker:         true,
-		ExecutorUser:         getenv(envExecutorUser, ""),
-		Prlimit:              getenv(envPrlimit, defaultPrlimit),
+		RuntimeMode:          strings.ToLower(getenv(envRuntime, defaultRuntime)),
+		Cgroup: shell.CgroupConfig{
+			Root:            getenv(envCgroupRoot, ""),
+			MemoryMaxBytes:  defaultCgroupMemory,
+			PidsMax:         defaultCgroupPids,
+			CPUPeriodMicros: defaultCgroupPeriod,
+		},
+		MaxOutputBytes: defaultMaxOutput,
+		EnableWorker:   true,
+		ExecutorUser:   getenv(envExecutorUser, ""),
+		Prlimit:        getenv(envPrlimit, defaultPrlimit),
 		Limits: shell.Limits{
 			CPU:               defaultLimitCPU,
 			AddressSpaceBytes: defaultLimitAS,
@@ -298,6 +319,35 @@ func Load() (Config, error) {
 		}
 		cfg.ExecutionTimeout = timeout
 	}
+
+	switch cfg.RuntimeMode {
+	case "direct":
+		cfg.Cgroup.Enabled = false
+	case "cgroup-v2":
+		cfg.Cgroup.Enabled = true
+	default:
+		return Config{}, fmt.Errorf("%s must be direct or cgroup-v2", envRuntime)
+	}
+	cgroupMemory, err := parseBound(envCgroupMemory, cfg.Cgroup.MemoryMaxBytes, maxByteLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Cgroup.MemoryMaxBytes = cgroupMemory
+	cgroupPids, err := parseBound(envCgroupPids, cfg.Cgroup.PidsMax, maxCountLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Cgroup.PidsMax = cgroupPids
+	cgroupQuota, err := parseBound(envCgroupCPUQuota, cfg.Cgroup.CPUQuotaMicros, maxCountLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Cgroup.CPUQuotaMicros = cgroupQuota
+	cgroupPeriod, err := parseBound(envCgroupCPUPeriod, cfg.Cgroup.CPUPeriodMicros, maxCountLimit)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Cgroup.CPUPeriodMicros = cgroupPeriod
 
 	if raw := strings.TrimSpace(os.Getenv(envMaxOutput)); raw != "" {
 		var n int
