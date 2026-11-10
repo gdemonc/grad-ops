@@ -36,6 +36,7 @@ Grad-Ops 是具备通用 Shell 能力、但不把主机权限交给模型的 Lin
 | [核心闭环旧实施计划](docs/plans/2026-10-14-grad-ops-core-loop.md) | Python 版本的历史实现参考 |
 | [测试报告](docs/test-report.md) | 旧 Python 版本的历史测试基线，不等同于 Go 版测试结果 |
 | [测试矩阵与验证现状](docs/testing.md) | Go 版：属性 → 测试对照、运行环境、未覆盖清单 |
+| [systemd 部署](deploy/README.md) | 非 root 账号、unit 加固、安装、验证与当前边界 |
 
 ## 目标技术栈
 
@@ -86,6 +87,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
 | Linux 隔离（namespace、cgroup、systemd、文件系统、网络） | **未实现**：目前有进程组、超时、输出上限、环境白名单、资源限制和可选的 uid 切换 |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
+| systemd 部署 | 已提供 hardened unit、环境文件示例、安装脚本和静态检查；`systemd-analyze verify` 通过，尚未在真实 systemd 主机完成安装运行 |
 
 ### 已验证 / 未验证
 
@@ -144,6 +146,15 @@ GRADOPS_EXECUTOR_USER=gradops-agent GRADOPS_ALLOWED_ROOTS=/var/log ./bin/gradops
 ```
 
 如果服务不是 root，而 `GRADOPS_EXECUTOR_USER` 指向另一个用户，启动会失败并说明无法切换身份。需要 shell 或 prlimit 的测试在工具缺失时会 `t.Skip`，而不是假装通过。
+
+systemd 部署：
+
+```bash
+go build -o bin/gradops ./cmd/gradops
+sudo deploy/install.sh ./bin/gradops
+```
+
+细节、权限和边界见 [systemd 部署](deploy/README.md)。
 
 环境变量：
 

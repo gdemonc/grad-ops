@@ -83,7 +83,7 @@
 - [x] 追加式审计事件与 SHA-256 链校验。
 - [x] 修改、删除、重排事件的篡改检测测试。
 - [x] Vue 3 前端对接 Go REST API（`npm run build` 通过，dev 代理联调验证）。
-- [ ] Linux systemd unit、专用非 root 账号、配置与数据库权限。
+- [ ] Linux systemd unit、专用非 root 账号、配置与数据库权限。（已提供 `deploy/gradops.service`、`gradops.env.example`、`install.sh` 和 `scripts/check-deploy.sh`；静态检查与 `systemd-analyze verify` 通过，尚未在真实 systemd 主机安装验证）
 - [x] README 更新为 Go/Linux 安装、运行、测试和限制说明。
 - [x] 测试报告只将 Python 测试作为历史背景；Go 测试结果必须来自 Go 实际实现与实测。
 - [x] 生成测试矩阵、性能测量与安全限制说明：`docs/testing.md`（含未覆盖清单与运行环境说明）。

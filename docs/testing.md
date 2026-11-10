@@ -56,6 +56,7 @@ go test -race ./... -count=1
 | API Bearer 认证：健康检查开放、其余路由拒绝缺失/错误 token | `api/auth_test.go`：`TestAPIHealthChecksDoNotRequireAToken`、`TestAPIRequiresTheConfiguredBearerToken`、`TestAPIWithoutATokenRemainsOpen` |
 | 无 token 时禁止非回环监听 | `config/config_test.go`：`TestNonLoopbackRequiresAnAPIToken`、`TestAPITokenAllowsNonLoopback`、`TestShortAPITokenIsRejected`、`TestLocalhostHostnameIsAllowedWithoutAToken` |
 | 整条闭环可用 | `e2e/loop_test.go`：`TestFullLoop` |
+| 部署文件保持非 root 与收紧边界 | `scripts/check-deploy.sh`：非 root、NoNewPrivileges、空 capability、ProtectSystem/Home、PrivateTmp、Namespaces/SUIDSGID、MemoryMax/TasksMax、`systemd-analyze verify` |
 
 ## 没有测试覆盖的部分
 
@@ -73,6 +74,7 @@ go test -race ./... -count=1
 - **多进程并发**：单连接 SQLite 与单进程 Worker 是设计前提；多实例同时运行没有测试。
 - **API 细粒度授权**：只有可选的单一 Bearer token，没有用户、角色、任务级权限或多租户隔离；未设置 token 时同机进程仍可调用 API。
 - **Linux CI**：以上结果来自一台开发机的本地运行，不是 CI 产物。Ubuntu LTS 的版本支持仍需 CI 固化。
+- **systemd 运行时**：unit 通过静态检查与 `systemd-analyze verify`，但没有在真实 systemd 主机安装、启动并验证 `ProtectSystem`、`PrivateTmp`、资源上限的实际效果。
 - **模型行为**：`GRADOPS_PLANNER` 默认为 `stub`；模型计划器的测试只证明 schema/上限/接线成立，不证明某个真实模型会稳定遵守提示。
 - **前端**：本次在 Ubuntu 上重新执行 `npm ci && npm run build`（含 `vue-tsc`）并通过；dev 代理与真实后端的联调未重新运行。
 
