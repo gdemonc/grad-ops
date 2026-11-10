@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - master
-      - feat/phase1-go-skeleton
+      - 'feat/**'
   pull_request:
     branches:
       - master
-      - feat/phase1-go-skeleton
+      - 'feat/**'
   workflow_dispatch:
 
 permissions:
