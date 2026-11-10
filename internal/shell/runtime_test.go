@@ -48,8 +48,11 @@ func TestResourceLimitsAreApplied(t *testing.T) {
 		t.Fatalf("new session: %v", err)
 	}
 
+	// Keep this probe entirely inside Bash builtins. Command substitutions
+	// such as "$(ulimit -u)" fork subshells, which can fail precisely because
+	// this test is verifying a low RLIMIT_NPROC value on shared CI runners.
 	result, err := session.Run(context.Background(),
-		`printf '%s %s %s %s %s\n' "$(ulimit -v)" "$(ulimit -t)" "$(ulimit -u)" "$(ulimit -f)" "$(ulimit -n)"`,
+		"ulimit -v; ulimit -t; ulimit -u; ulimit -f; ulimit -n",
 	)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -58,7 +61,7 @@ func TestResourceLimitsAreApplied(t *testing.T) {
 		t.Fatalf("script failed: exit=%d stderr=%q", result.ExitCode, result.Stderr)
 	}
 
-	const want = "262144 5 64 1024 128"
+	const want = "262144\n5\n64\n1024\n128"
 	if got := strings.TrimSpace(result.Stdout); got != want {
 		t.Fatalf("limits reported by the shell = %q, want %q", got, want)
 	}
