@@ -127,7 +127,7 @@ POST /api/tasks
 
 ### 已知限制（不是待办清单的装饰）
 
-- **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；`GRADOPS_AGENT_LOOP=true` 才启用多轮 observe/finish，否则仍走两阶段。DeepSeek `deepseek-flash` 已做真实联调（直接测试 + systemd 服务任务 + 两轮动态调查），其他 provider/model 尚未验证；模型输出仍只被当作不可信输入。
+- **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；`GRADOPS_AGENT_LOOP=true` 才启用多轮 observe/finish，否则仍走两阶段。DeepSeek `deepseek-flash` 已做真实联调（直接测试 + systemd 服务任务 + 两轮动态调查），Key 读取 `GRADOPS_LLM_API_KEY` 或仅 deepseek provider 下的 `DEEPSEEK_API_KEY`；其他 provider/model 尚未验证；模型输出仍只被当作不可信输入。
 - **bubblewrap 沙箱**：代码已实现，部署示例启用 `bubblewrap`；真实 systemd 服务上启动探测通过，任务探针在沙箱内完成并封存。默认 `.env.example` 仍为 `none`，需要显式启用。
 - **Agent 重试**：Worker 每次尝试是独立 attempt；Evidence 按 Task + Attempt 关联，重试不自动恢复上一次的模型上下文，旧 attempt 只保留审计追溯。
 - **隔离粒度**：`Session` 每次 `Run` 新建 cgroup/namespace；`Console` 的 cgroup/namespace 从 `NewConsole` 存活到 `Close`，一次调查的多条探针共享它，但不会跨 Action 复用。可写路径是全局 `GRADOPS_ALLOWED_ROOTS`，网络只有隔离/共享两种模式，没有 IP/端口/DNS allowlist；symlink/TOCTOU 未防护。
@@ -213,7 +213,7 @@ sudo scripts/verify-cgroup.sh
 | `GRADOPS_LLM_MODEL` | 空 | `model` 模式必填 |
 | `GRADOPS_LLM_TIMEOUT` | `30s` | 单次 provider 请求超时，最长 5 分钟 |
 | `GRADOPS_LLM_MAX_RESPONSE_BYTES` | `1048576` | provider 响应体上限 |
-| `GRADOPS_LLM_PROVIDER` | `openai` | `openai` 或 `deepseek`；deepseek 自动填充 base URL/model，且要求 API Key |
+| `GRADOPS_LLM_PROVIDER` | `openai` | `openai` 或 `deepseek`；deepseek 自动填充 base URL/model，且要求 API Key（也接受 `DEEPSEEK_API_KEY`） |
 | `GRADOPS_LLM_MAX_PROBES` | `6` | 单次调查最多探针数 |
 | `GRADOPS_AGENT_LOOP` | `false` | 多轮 observe/finish；需要 `GRADOPS_PLANNER=model` |
 | `GRADOPS_AGENT_MAX_ROUNDS` | `20` | 最大决策轮数，2–20；最后一轮只允许 finish |

@@ -370,6 +370,9 @@ func TestDeepSeekPresetFillsTheCompatibleEndpoint(t *testing.T) {
 	if cfg.LLMProvider != "deepseek" || cfg.LLMBaseURL != "https://api.deepseek.com" || cfg.LLMModel != "deepseek-flash" {
 		t.Fatalf("unexpected deepseek preset: provider=%q base=%q model=%q", cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
 	}
+	if cfg.LLMAPIKey != "test-key" {
+		t.Fatalf("GRADOPS_LLM_API_KEY was not preserved")
+	}
 }
 
 func TestDeepSeekRequiresAnAPIKeyAndKnownProvider(t *testing.T) {
@@ -381,5 +384,33 @@ func TestDeepSeekRequiresAnAPIKeyAndKnownProvider(t *testing.T) {
 	}
 	if _, err := loadWith(t, map[string]string{"GRADOPS_LLM_PROVIDER": "unknown"}); err == nil {
 		t.Fatal("expected an unknown provider to be rejected")
+	}
+}
+
+func TestDeepSeekAcceptItsDocumentedAPIKeyAlias(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{
+		"GRADOPS_PLANNER":      "model",
+		"GRADOPS_LLM_PROVIDER": "deepseek",
+		"DEEPSEEK_API_KEY":     "deepseek-alias-key",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.LLMAPIKey != "deepseek-alias-key" {
+		t.Fatalf("DEEPSEEK_API_KEY was not used for the deepseek provider")
+	}
+
+	openai, err := loadWith(t, map[string]string{
+		"GRADOPS_LLM_PROVIDER": "openai",
+		"GRADOPS_PLANNER":      "model",
+		"GRADOPS_LLM_BASE_URL": "http://127.0.0.1:18080/v1",
+		"GRADOPS_LLM_MODEL":    "test-model",
+		"DEEPSEEK_API_KEY":     "must-not-be-used",
+	})
+	if err != nil {
+		t.Fatalf("openai load: %v", err)
+	}
+	if openai.LLMAPIKey != "" {
+		t.Fatal("DEEPSEEK_API_KEY must not be used by the openai provider")
 	}
 }

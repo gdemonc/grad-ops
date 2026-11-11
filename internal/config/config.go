@@ -64,6 +64,7 @@ const (
 	envLLMProvider     = "GRADOPS_LLM_PROVIDER"
 	envLLMBaseURL      = "GRADOPS_LLM_BASE_URL"
 	envLLMAPIKey       = "GRADOPS_LLM_API_KEY"
+	envDeepSeekAPIKey  = "DEEPSEEK_API_KEY"
 	envLLMModel        = "GRADOPS_LLM_MODEL"
 	envLLMTimeout      = "GRADOPS_LLM_TIMEOUT"
 	envLLMResponse     = "GRADOPS_LLM_MAX_RESPONSE_BYTES"
@@ -472,6 +473,12 @@ func Load() (Config, error) {
 		}
 	default:
 		return Config{}, fmt.Errorf("%s must be openai or deepseek (got %q)", envLLMProvider, cfg.LLMProvider)
+	}
+	if cfg.LLMProvider == "deepseek" && cfg.LLMAPIKey == "" {
+		// DeepSeek's own documentation uses DEEPSEEK_API_KEY. Accept it only
+		// for the deepseek preset so an unrelated key cannot be sent to
+		// another provider.
+		cfg.LLMAPIKey = strings.TrimSpace(os.Getenv(envDeepSeekAPIKey))
 	}
 	if raw := strings.TrimSpace(os.Getenv(envAgentLoop)); raw != "" {
 		value, err := parseBool(envAgentLoop, raw)
