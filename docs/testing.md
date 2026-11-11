@@ -2,7 +2,7 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、231 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针 `SEALED`，`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 通过；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、231 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针 `SEALED`，`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 通过；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200；2026-11-11 用真实 DeepSeek `deepseek-flash` 跑通 `TestDeepSeekAgentLoopRealProvider`（`wc`、`grep`、`tail` 三条只读观察，结论正确引用 fixture 日志）。
 
 ## 如何运行
 
@@ -106,8 +106,8 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 - **bubblewrap 的逐项边界**：真实 systemd 服务启动探测通过，worker 探针在沙箱内 `SEALED`，root-only/loopback-only 集成测试通过；没有逐项验证每个可写根、DNS/网络副作用或所有外部命令的兼容性。
 - **cgroup 之外的隔离**：没有更细的 mount/network 策略；bubblewrap 默认关闭。
 - **worker 路径**：cgroup 验证使用 shell 集成测试，没有单独观察 Worker 任务产生的子 cgroup。
-- **DeepSeek 真实 provider**：`TestDeepSeekAgentLoopRealProvider` 只做一次真实联调，默认 skip；没有在 CI 中运行，不能把 mock 结果当成 provider 已验证。
-- **Agent Loop 真实模型效果**：多轮协议和动态分支由 mock `llm.Completer`/脚本决策器验证，没有用真实 provider 跑过 Java 502 场景；模型延迟、真实提示注入和 token 消耗仍需实测。`TestAgentLoopObservesRealProcessAndLogState` 读取真实 `/proc` 和日志文件，但 fixture 是 `sleep` + 临时日志，不是 Java/Nginx 502 环境。重试 attempt 有单元测试，尚未在真实 Worker 队列里制造一次失败/重试。
+- **DeepSeek 真实 provider**：`TestDeepSeekAgentLoopRealProvider` 已用真实 Key 在 2026-11-11 通过一次（`deepseek-flash`，真实 fixture 日志）；其他 provider/model、限流、长上下文和提示注入未覆盖，CI 中仍默认 skip。
+- **Agent Loop 真实模型效果**：多轮协议和动态分支由 mock `llm.Completer`/脚本决策器验证；DeepSeek `deepseek-flash` 已跑通一次真实 fixture 日志调查，但没有复现真实 Java/Nginx 502 场景，模型延迟、提示注入和长期 token 消耗仍需继续观察。`TestAgentLoopObservesRealProcessAndLogState` 读取真实 `/proc` 和日志文件，但 fixture 是 `sleep` + 临时日志，不是 Java/Nginx 502 环境。重试 attempt 有单元测试，尚未在真实 Worker 队列里制造一次失败/重试。
 - **文件系统与网络隔离**：没有 Landlock、Bubblewrap、seccomp、只读挂载或网络策略。
 - **真实 `/var/log` 文件边界**：路径只在策略层做词法规整；没有 symlink、TOCTOU 或 `openat2` 测试。
 - **AST 分析的完整性**：分析器只识别已知命令和已知间接执行形式；未知命令、运行时展开、外部脚本和复杂数据流仍可能写文件。它被明确当作辅助校验，不是沙箱。
