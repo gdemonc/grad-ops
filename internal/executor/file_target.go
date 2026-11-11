@@ -20,6 +20,21 @@ func (s *Service) executeFileTarget(ctx context.Context, proposal storedProposal
 		Status:     StatusSucceeded,
 	}
 
+	// A file operation has no shell credential switch. Refuse rather than
+	// writing as the service account while the contract names another user.
+	if !identityMatches(proposal.Contract.RunAs) {
+		outcome.Status = StatusFailed
+		outcome.Stderr = fmt.Sprintf("file target requires run_as %q, current process is not that identity", proposal.Contract.RunAs)
+		finished := s.now().UTC()
+		outcome.Duration = finished.Sub(started)
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if err := s.record(recordCtx, proposal, outcome, started, finished, actor); err != nil {
+			return outcome, err
+		}
+		return outcome, nil
+	}
+
 	bound := fileops.Target{
 		Root:         target.Root,
 		RootIdentity: fileops.Identity{Dev: target.RootDevice, Ino: target.RootInode},

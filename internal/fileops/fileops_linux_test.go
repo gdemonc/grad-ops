@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/gdemonc/grad-ops/internal/fileops"
@@ -236,5 +237,43 @@ func TestTargetAppendRejectsAReplacedRoot(t *testing.T) {
 	}
 	if string(content) != "original\n" {
 		t.Fatalf("old target was modified: %q", content)
+	}
+}
+
+func TestBindRejectsDirectoriesAndFIFOs(t *testing.T) {
+	root, dir := testRoot(t)
+	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	for _, relative := range []string{"subdir", "pipe"} {
+		t.Run(relative, func(t *testing.T) {
+			if _, err := fileops.Bind(root.Path(), relative); !errors.Is(err, fileops.ErrUnsupportedFileType) {
+				t.Fatalf("expected ErrUnsupportedFileType, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAppendRejectsANonRegularReplacement(t *testing.T) {
+	root, dir := testRoot(t)
+	path := filepath.Join(dir, "app.log")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	target, err := fileops.Bind(root.Path(), "app.log")
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("mkfifo replacement: %v", err)
+	}
+	if err := target.Append([]byte("must-not-append\n")); !errors.Is(err, fileops.ErrUnsupportedFileType) {
+		t.Fatalf("expected ErrUnsupportedFileType, got %v", err)
 	}
 }

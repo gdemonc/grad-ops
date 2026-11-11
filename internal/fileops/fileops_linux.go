@@ -28,6 +28,8 @@ var (
 	ErrInvalidPath = errors.New("invalid file path")
 	// ErrUnsafePath means the kernel refused the path constraints.
 	ErrUnsafePath = errors.New("unsafe file path")
+	// ErrUnsupportedFileType means the target is not a regular file.
+	ErrUnsupportedFileType = errors.New("unsupported file type")
 )
 
 // Root is an opened directory used as the base for fd-relative operations.
@@ -90,7 +92,7 @@ func (r *Root) Open(relative string, flags int, mode uint32) (*os.File, error) {
 		if errors.Is(err, syscall.ENOSYS) {
 			return nil, fmt.Errorf("%w: openat2 is not supported by this kernel", ErrUnsafePath)
 		}
-		return nil, fmt.Errorf("%w: open %q beneath %q: %v", ErrUnsafePath, relative, r.path, err)
+		return nil, fmt.Errorf("%w: open %q beneath %q: %w", ErrUnsafePath, relative, r.path, err)
 	}
 	file := os.NewFile(uintptr(fd), filepath.Join(r.path, relative))
 	if file == nil {
@@ -102,12 +104,12 @@ func (r *Root) Open(relative string, flags int, mode uint32) (*os.File, error) {
 
 // Read opens an existing target read-only.
 func (r *Root) Read(relative string) (*os.File, error) {
-	return r.Open(relative, os.O_RDONLY, 0)
+	return r.Open(relative, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 }
 
 // Write opens a target for writing, creating/truncating it as requested.
 func (r *Root) Write(relative string, flags int, mode os.FileMode) (*os.File, error) {
-	writeFlags := (flags &^ unix.O_ACCMODE) | os.O_WRONLY
+	writeFlags := (flags &^ unix.O_ACCMODE) | os.O_WRONLY | syscall.O_NONBLOCK
 	return r.Open(relative, writeFlags, uint32(mode.Perm()))
 }
 
@@ -190,6 +192,13 @@ func Bind(root, relative string) (Target, error) {
 		return Target{}, err
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return Target{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return Target{}, fmt.Errorf("%w: %s/%s is %s", ErrUnsupportedFileType, root, relative, info.Mode())
+	}
 	identity, err := Stat(file)
 	if err != nil {
 		return Target{}, err
@@ -219,10 +228,22 @@ func (t Target) OpenVerified(flags int, mode os.FileMode) (*os.File, error) {
 			ErrIdentityMismatch, t.Root, rootIdentity.Dev, rootIdentity.Ino,
 			t.RootIdentity.Dev, t.RootIdentity.Ino)
 	}
-	file, err := r.Open(t.Relative, flags, uint32(mode.Perm()))
+	file, err := r.Open(t.Relative, flags|syscall.O_NONBLOCK, uint32(mode.Perm()))
 	_ = r.Close()
 	if err != nil {
+		if errors.Is(err, syscall.ENXIO) {
+			return nil, fmt.Errorf("%w: %s/%s cannot be opened as a regular file", ErrUnsupportedFileType, t.Root, t.Relative)
+		}
 		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %s/%s is %s", ErrUnsupportedFileType, t.Root, t.Relative, info.Mode())
 	}
 	identity, err := Stat(file)
 	if err != nil {
@@ -241,7 +262,7 @@ func (t Target) OpenVerified(flags int, mode os.FileMode) (*os.File, error) {
 // Append appends data through a verified fd and fsyncs it. It never creates a
 // missing target and never follows a symlink.
 func (t Target) Append(data []byte) error {
-	file, err := t.OpenVerified(os.O_WRONLY|os.O_APPEND, 0)
+	file, err := t.OpenVerified(os.O_WRONLY|os.O_APPEND|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return err
 	}

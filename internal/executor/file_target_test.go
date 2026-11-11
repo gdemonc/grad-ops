@@ -3,6 +3,7 @@ package executor_test
 import (
 	"context"
 	"os"
+	"os/user"
 	"path/filepath"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func buildFileContract(t *testing.T, root, relative, data string) (contract.Cont
 		WorkDir:    "/",
 		Env:        map[string]string{},
 		Paths:      []string{filepath.Join(root, relative)},
-		RunAs:      "gradops-agent",
+		RunAs:      currentUsername(t),
 		Reversible: true,
 		Runtime:    contract.Runtime{TimeoutMS: 5000, MaxOutputBytes: 4096, MaxCalls: 1},
 		Postcondition: contract.Postcondition{
@@ -166,5 +167,50 @@ func TestFileTargetRejectsAnIdentityChange(t *testing.T) {
 	}
 	if status != string(domain.StatusFailed) || stage != "execution" {
 		t.Fatalf("unexpected task state: %s/%s", status, stage)
+	}
+}
+
+func currentUsername(t *testing.T) string {
+	t.Helper()
+	current, err := user.Current()
+	if err != nil {
+		t.Fatalf("current user: %v", err)
+	}
+	return current.Username
+}
+
+func TestFileTargetRejectsADifferentRunAs(t *testing.T) {
+	h, root := newFileHarness(t)
+	path := filepath.Join(root, "app.log")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	c, _ := buildFileContract(t, root, "app.log", "must-not-append\n")
+	c.RunAs = "not-the-current-user"
+	if err := c.Canonicalize(); err != nil {
+		t.Fatalf("canonicalize: %v", err)
+	}
+	digest, err := c.Digest()
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	taskID, proposalID := seed(t, h.db, c, digest)
+	token := h.approve(t, taskID, proposalID, digest)
+
+	outcome, err := h.service.Execute(context.Background(), executor.Request{
+		ProposalID: proposalID, ApprovalToken: token, Actor: "worker-1",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Status != executor.StatusFailed {
+		t.Fatalf("expected FAILED, got %s", outcome.Status)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(content) != "original\n" {
+		t.Fatalf("file was modified: %q", content)
 	}
 }
