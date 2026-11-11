@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/gdemonc/grad-ops/internal/contract"
 	"github.com/gdemonc/grad-ops/internal/domain"
 	"github.com/gdemonc/grad-ops/internal/evidence"
+	"github.com/gdemonc/grad-ops/internal/fileops"
 	"github.com/gdemonc/grad-ops/internal/policy"
 	"github.com/gdemonc/grad-ops/internal/shell"
 	"github.com/gdemonc/grad-ops/internal/store"
@@ -44,14 +46,26 @@ var (
 
 // Action is a proposed side effect.
 type Action struct {
-	Kind          policy.Kind
-	Script        string
+	Kind   policy.Kind
+	Script string
+	// File, when set, asks the executor to perform a bound file operation
+	// instead of running Script. Script is kept for contract naming and audit.
+	File          *FileAction
 	Paths         []string
 	RunAs         string
 	Reversible    bool
 	Postcondition contract.Postcondition
 	Compensation  *contract.Compensation
 	Rationale     string
+}
+
+// FileAction describes a minimal controlled file mutation. Root must be one of
+// the configured FileRoots; Relative is resolved beneath it with openat2 at
+// proposal time, so the approved contract carries the target identity.
+type FileAction struct {
+	Root     string
+	Relative string
+	Data     string
 }
 
 // Observation is one probe result as a concluding planner sees it.
@@ -144,6 +158,9 @@ type Config struct {
 	// Sandbox is the optional bubblewrap namespace/filesystem boundary for
 	// probe shells.
 	Sandbox shell.SandboxConfig
+	// FileRoots are the trusted directories for bound file operations. They
+	// must be absolute and are never taken from model output.
+	FileRoots []string
 	// TotalTimeout bounds one investigation across every probe and model call.
 	// Zero uses the default.
 	TotalTimeout time.Duration
@@ -395,6 +412,15 @@ func validateProbes(probes []string) error {
 // indirect execution or dynamic command name. Other kinds are priced by policy
 // and, where required, shown to a human.
 func validateAction(action Action) error {
+	if action.File != nil {
+		if action.Kind != policy.KindModifyFile {
+			return fmt.Errorf("%w: bound file operations must be modify_file", ErrInvalidPlan)
+		}
+		if action.File.Root == "" || action.File.Relative == "" {
+			return fmt.Errorf("%w: bound file operation needs a root and relative path", ErrInvalidPlan)
+		}
+		return nil
+	}
 	analysis, err := command.Analyze(action.Script)
 	if err != nil {
 		return fmt.Errorf("%w: proposed script cannot be parsed: %v", ErrInvalidPlan, err)
@@ -490,9 +516,58 @@ func (s *Service) conclude(ctx context.Context, taskID int64, plan Plan, records
 	return result, nil
 }
 
+// bindFileAction resolves the trusted root and records the target identity for
+// the contract. The path is opened here once; the executor opens it again
+// through fileops and compares the identity before writing.
+func (s *Service) bindFileAction(action *Action) (*contract.FileTarget, string, []string, error) {
+	if action == nil || action.File == nil {
+		return nil, "", nil, nil
+	}
+	root := filepath.Clean(action.File.Root)
+	trusted := false
+	for _, configured := range s.cfg.FileRoots {
+		if filepath.Clean(configured) == root {
+			trusted = true
+			break
+		}
+	}
+	if !trusted {
+		return nil, "", nil, fmt.Errorf("%w: file root %q is not trusted", ErrInvalidPlan, action.File.Root)
+	}
+	target, err := fileops.Bind(root, action.File.Relative)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("%w: bind file target: %v", ErrInvalidPlan, err)
+	}
+	absolute := filepath.Join(root, target.Relative)
+	script := strings.TrimSpace(action.Script)
+	if script == "" {
+		script = fmt.Sprintf("fileops append %s/%s", root, target.Relative)
+	}
+	return &contract.FileTarget{
+		Root:       target.Root,
+		RootDevice: target.RootIdentity.Dev,
+		RootInode:  target.RootIdentity.Ino,
+		Relative:   target.Relative,
+		Operation:  "append",
+		Data:       action.File.Data,
+		Device:     target.Identity.Dev,
+		Inode:      target.Identity.Ino,
+	}, script, []string{absolute}, nil
+}
+
 // propose records the evidence and creates a proposal for the approval flow.
 func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records []evidence.Record) (Result, error) {
 	action := plan.Action
+	fileTarget, fileScript, filePaths, err := s.bindFileAction(action)
+	if err != nil {
+		return Result{}, err
+	}
+	tool := "bash"
+	if fileTarget != nil {
+		tool = "fileops"
+		action.Script = fileScript
+		action.Paths = filePaths
+	}
 
 	// An action may be proposed without citations (the stub path does), but if
 	// the planner did cite probes they must identify evidence saved with this
@@ -528,7 +603,7 @@ func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records 
 
 	c := contract.Contract{
 		TaskID:        taskID,
-		Tool:          "bash",
+		Tool:          tool,
 		Kind:          string(action.Kind),
 		Script:        action.Script,
 		WorkDir:       s.cfg.ContractWorkDir,
@@ -539,6 +614,7 @@ func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records 
 		Runtime:       contract.Runtime{TimeoutMS: s.cfg.Timeout.Milliseconds(), MaxOutputBytes: int64(s.cfg.MaxOutputBytes), MaxCalls: 1},
 		Postcondition: action.Postcondition,
 		Compensation:  action.Compensation,
+		FileTarget:    fileTarget,
 		Risk:          string(evaluation.Risk),
 		PolicyVersion: evaluation.PolicyVersion,
 		ApprovalLevel: approvalLevel(evaluation),

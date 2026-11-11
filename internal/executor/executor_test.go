@@ -115,8 +115,8 @@ func seed(t *testing.T, db *store.DB, c contract.Contract, digest string) (taskI
 		result, err = tx.Exec(
 			`INSERT INTO proposals
 			    (task_id, tool, arguments, risk_level, policy_version, contract, contract_digest, status, created_at)
-			 VALUES (?, 'bash', '{}', ?, ?, ?, ?, 'PENDING_APPROVAL', ?)`,
-			taskID, c.Risk, c.PolicyVersion, string(raw), digest, now)
+			 VALUES (?, ?, '{}', ?, ?, ?, ?, 'PENDING_APPROVAL', ?)`,
+			taskID, c.Tool, c.Risk, c.PolicyVersion, string(raw), digest, now)
 		if err != nil {
 			return err
 		}

@@ -293,6 +293,10 @@ func (s *Service) Execute(ctx context.Context, req Request) (Outcome, error) {
 		}
 	}
 
+	if proposal.Contract.FileTarget != nil {
+		return s.executeFileTarget(ctx, proposal, req.Actor)
+	}
+
 	session, err := s.session(proposal.Contract)
 	if err != nil {
 		s.release(ctx, proposal.ID, proposal.TaskID, previous)
@@ -513,10 +517,18 @@ func (s *Service) record(ctx context.Context, proposal storedProposal, outcome O
 			return fmt.Errorf("execution id: %w", err)
 		}
 
+		tool := proposal.Contract.Tool
+		if tool == "" {
+			tool = "bash"
+		}
+		command := proposal.Contract.Script
+		if target := proposal.Contract.FileTarget; target != nil {
+			command = fmt.Sprintf("%s %s/%s", target.Operation, target.Root, target.Relative)
+		}
 		record := evidence.Record{
 			TaskID:     proposal.TaskID,
-			Tool:       "bash",
-			Command:    proposal.Contract.Script,
+			Tool:       tool,
+			Command:    command,
 			ObservedAt: finished,
 			Content:    renderOutput(outcome),
 			Truncated:  outcome.Truncated,
@@ -538,7 +550,7 @@ func (s *Service) record(ctx context.Context, proposal storedProposal, outcome O
 			return fmt.Errorf("update task: %w", err)
 		}
 
-		payload, err := json.Marshal(map[string]any{
+		payload := map[string]any{
 			"proposal_id":  proposal.ID,
 			"execution_id": outcome.ExecutionID,
 			"outcome":      outcome.Status,
@@ -547,7 +559,15 @@ func (s *Service) record(ctx context.Context, proposal storedProposal, outcome O
 			"timed_out":    outcome.TimedOut,
 			"truncated":    outcome.Truncated,
 			"evidence_id":  record.ID,
-		})
+		}
+		if target := proposal.Contract.FileTarget; target != nil {
+			payload["file_root"] = target.Root
+			payload["file_relative"] = target.Relative
+			payload["file_operation"] = target.Operation
+			payload["file_device"] = target.Device
+			payload["file_inode"] = target.Inode
+		}
+		encodedPayload, err := json.Marshal(payload)
 		if err != nil {
 			return fmt.Errorf("encode audit payload: %w", err)
 		}
@@ -558,7 +578,7 @@ func (s *Service) record(ctx context.Context, proposal storedProposal, outcome O
 			Actor:     actor,
 			Type:      eventType(outcome.Status),
 			Message:   fmt.Sprintf("proposal %d finished %s", proposal.ID, outcome.Status),
-			Payload:   payload,
+			Payload:   encodedPayload,
 			CreatedAt: finished,
 		})
 	})

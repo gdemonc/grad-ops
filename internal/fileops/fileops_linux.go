@@ -157,3 +157,100 @@ func Stat(file *os.File) (Identity, error) {
 		Size: info.Size(),
 	}, nil
 }
+
+// ErrIdentityMismatch means the object at the target path is no longer the
+// object whose identity was bound to the action.
+var ErrIdentityMismatch = errors.New("file identity changed")
+
+// Target is a bound file operation target: a trusted root, a relative path,
+// and the identity observed at bind time.
+type Target struct {
+	Root         string   `json:"root"`
+	RootIdentity Identity `json:"root_identity"`
+	Relative     string   `json:"relative"`
+	Identity     Identity `json:"identity"`
+}
+
+// Bind records the identity of an existing file beneath a trusted root.
+//
+// The root is configuration, never model output. The target is opened with the
+// same openat2 constraints as every later execution.
+func Bind(root, relative string) (Target, error) {
+	r, err := OpenRoot(root)
+	if err != nil {
+		return Target{}, err
+	}
+	defer r.Close()
+	rootIdentity, err := Stat(r.dir)
+	if err != nil {
+		return Target{}, err
+	}
+	file, err := r.Read(relative)
+	if err != nil {
+		return Target{}, err
+	}
+	defer file.Close()
+	identity, err := Stat(file)
+	if err != nil {
+		return Target{}, err
+	}
+	return Target{
+		Root: filepath.Clean(root), RootIdentity: rootIdentity,
+		Relative: relative, Identity: identity,
+	}, nil
+}
+
+// OpenVerified re-opens the bound target and refuses it unless the kernel
+// identity still matches. The returned file is the fd that must be used for
+// the operation; callers must not re-open by path.
+func (t Target) OpenVerified(flags int, mode os.FileMode) (*os.File, error) {
+	r, err := OpenRoot(t.Root)
+	if err != nil {
+		return nil, err
+	}
+	rootIdentity, err := Stat(r.dir)
+	if err != nil {
+		_ = r.Close()
+		return nil, err
+	}
+	if rootIdentity.Dev != t.RootIdentity.Dev || rootIdentity.Ino != t.RootIdentity.Ino {
+		_ = r.Close()
+		return nil, fmt.Errorf("%w: root %s is %d:%d, bound %d:%d",
+			ErrIdentityMismatch, t.Root, rootIdentity.Dev, rootIdentity.Ino,
+			t.RootIdentity.Dev, t.RootIdentity.Ino)
+	}
+	file, err := r.Open(t.Relative, flags, uint32(mode.Perm()))
+	_ = r.Close()
+	if err != nil {
+		return nil, err
+	}
+	identity, err := Stat(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if identity.Dev != t.Identity.Dev || identity.Ino != t.Identity.Ino {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %s/%s is %d:%d, bound %d:%d",
+			ErrIdentityMismatch, t.Root, t.Relative,
+			identity.Dev, identity.Ino, t.Identity.Dev, t.Identity.Ino)
+	}
+	return file, nil
+}
+
+// Append appends data through a verified fd and fsyncs it. It never creates a
+// missing target and never follows a symlink.
+func (t Target) Append(data []byte) error {
+	file, err := t.OpenVerified(os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		return fmt.Errorf("append target: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync target: %w", err)
+	}
+	return nil
+}

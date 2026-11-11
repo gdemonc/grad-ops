@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -71,6 +72,7 @@ type Contract struct {
 	Runtime       Runtime           `json:"runtime"`
 	Postcondition Postcondition     `json:"postcondition"`
 	Compensation  *Compensation     `json:"compensation,omitempty"`
+	FileTarget    *FileTarget       `json:"file_target,omitempty"`
 	Risk          string            `json:"risk"`
 	PolicyVersion string            `json:"policy_version"`
 	ApprovalLevel string            `json:"approval_level"`
@@ -134,6 +136,9 @@ func (c *Contract) Canonicalize() error {
 		if c.Compensation.Command == "" {
 			return fmt.Errorf("contract compensation requires a command")
 		}
+	}
+	if err := c.FileTarget.validate(); err != nil {
+		return fmt.Errorf("contract file target: %w", err)
 	}
 
 	created, err := domain.ParseTime(c.CreatedAt)
@@ -325,5 +330,48 @@ func writeString(out *bytes.Buffer, s string) error {
 		}
 	}
 	out.WriteByte('"')
+	return nil
+}
+
+// FileTarget binds an approved file operation to the exact inode observed when
+// the proposal was created. The executor must re-open this target through
+// fileops and compare Dev/Ino before using the returned fd.
+type FileTarget struct {
+	Root       string `json:"root"`
+	RootDevice uint64 `json:"root_device"`
+	RootInode  uint64 `json:"root_inode"`
+	Relative   string `json:"relative"`
+	Operation  string `json:"operation"`
+	Data       string `json:"data,omitempty"`
+	Device     uint64 `json:"device"`
+	Inode      uint64 `json:"inode"`
+}
+
+func (t *FileTarget) validate() error {
+	if t == nil {
+		return nil
+	}
+	if !strings.HasPrefix(t.Root, "/") {
+		return fmt.Errorf("file target root must be absolute")
+	}
+	if t.Relative == "" || strings.HasPrefix(t.Relative, "/") {
+		return fmt.Errorf("file target relative path must be non-empty and relative")
+	}
+	for _, part := range strings.Split(filepath.ToSlash(t.Relative), "/") {
+		if part == ".." {
+			return fmt.Errorf("file target path must not contain ..")
+		}
+	}
+	switch t.Operation {
+	case "append":
+	default:
+		return fmt.Errorf("unsupported file target operation %q", t.Operation)
+	}
+	if len(t.Data) > 64<<10 {
+		return fmt.Errorf("file target data exceeds 64 KiB")
+	}
+	if t.RootDevice == 0 || t.RootInode == 0 || t.Device == 0 || t.Inode == 0 {
+		return fmt.Errorf("file target root and object identity are required")
+	}
 	return nil
 }

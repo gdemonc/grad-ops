@@ -123,3 +123,118 @@ func TestReadWriteAndIdentityStayOnTheOpenedFD(t *testing.T) {
 		t.Fatalf("identity changed: %+v vs %+v", identity, againIdentity)
 	}
 }
+
+func TestTargetAppendUsesTheBoundIdentity(t *testing.T) {
+	root, dir := testRoot(t)
+	path := filepath.Join(dir, "app.log")
+	if err := os.WriteFile(path, []byte("start\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	target, err := fileops.Bind(root.Path(), "app.log")
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if err := target.Append([]byte("next\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(content) != "start\nnext\n" {
+		t.Fatalf("unexpected content: %q", content)
+	}
+}
+
+func TestTargetAppendRejectsAReplacedPath(t *testing.T) {
+	root, dir := testRoot(t)
+	path := filepath.Join(dir, "app.log")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	target, err := fileops.Bind(root.Path(), "app.log")
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	if err := os.Rename(path, filepath.Join(dir, "old.log")); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("replacement\n"), 0o600); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if err := target.Append([]byte("must-not-append\n")); !errors.Is(err, fileops.ErrIdentityMismatch) {
+		t.Fatalf("expected ErrIdentityMismatch, got %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read replacement: %v", err)
+	}
+	if string(content) != "replacement\n" {
+		t.Fatalf("replacement was modified: %q", content)
+	}
+}
+
+func TestTargetAppendRejectsASymlinkSwap(t *testing.T) {
+	root, dir := testRoot(t)
+	path := filepath.Join(dir, "app.log")
+	outside := filepath.Join(t.TempDir(), "outside.log")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(outside, []byte("outside\n"), 0o600); err != nil {
+		t.Fatalf("write outside: %v", err)
+	}
+	target, err := fileops.Bind(root.Path(), "app.log")
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := os.Symlink(outside, path); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := target.Append([]byte("must-not-append\n")); !errors.Is(err, fileops.ErrUnsafePath) {
+		t.Fatalf("expected ErrUnsafePath, got %v", err)
+	}
+	content, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatalf("read outside: %v", err)
+	}
+	if string(content) != "outside\n" {
+		t.Fatalf("outside target was modified: %q", content)
+	}
+}
+
+func TestTargetAppendRejectsAReplacedRoot(t *testing.T) {
+	root, dir := testRoot(t)
+	if err := os.WriteFile(filepath.Join(dir, "app.log"), []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	target, err := fileops.Bind(root.Path(), "app.log")
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	oldRoot := dir + "-old"
+	if err := os.Rename(dir, oldRoot); err != nil {
+		t.Fatalf("rename root: %v", err)
+	}
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("create replacement root: %v", err)
+	}
+	if err := os.Link(filepath.Join(oldRoot, "app.log"), filepath.Join(dir, "app.log")); err != nil {
+		t.Fatalf("link target: %v", err)
+	}
+	if err := target.Append([]byte("must-not-append\n")); !errors.Is(err, fileops.ErrIdentityMismatch) {
+		t.Fatalf("expected root identity mismatch, got %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(oldRoot, "app.log"))
+	if err != nil {
+		t.Fatalf("read old root: %v", err)
+	}
+	if string(content) != "original\n" {
+		t.Fatalf("old target was modified: %q", content)
+	}
+}
