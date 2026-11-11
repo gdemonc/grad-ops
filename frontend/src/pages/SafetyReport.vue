@@ -153,6 +153,14 @@ onMounted(() => {
               </span>
             </div>
             <div class="kv">
+              <span class="k">Agent Loop</span>
+              <span class="v">
+                <a-tag :color="store.safetyReport.runtime.agent_loop ? 'green' : 'default'" size="small">
+                  {{ store.safetyReport.runtime.agent_loop ? '多轮只读' : '未启用' }}
+                </a-tag>
+              </span>
+            </div>
+            <div class="kv">
               <span class="k">沙箱</span>
               <span class="v">
                 <a-tag :color="store.safetyReport.runtime.sandbox_mode === 'bubblewrap' ? 'green' : 'orange'" size="small">

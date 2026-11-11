@@ -4,7 +4,7 @@
 
 > **项目实现方式：** Greenfield Go implementation（Go 全新实现）。  
 > **目标架构：** Go 后端 + Linux-only 工具层 + SQLite + 沿用 Vue 3 前端。  
-> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 客户端与两阶段计划器已实现（默认仍用 stub），Linux Runtime 的 per-action cgroup v2（可选）、uid 切换、prlimit 资源限制和可选的 bubblewrap 命名空间/文件系统沙箱已实现，并已在真实 systemd 服务中验证。详见[当前实现状态](#当前实现状态)。
+> **实现状态：** 单机闭环的机制已实现并有测试覆盖（队列 → 调查 → 证据 → 策略 → 契约 → 审批 → 执行 → 独立验证 → 补偿回滚 → 审计），控制台已对接 Go 接口；LLM 客户端、两阶段计划器和可选的多轮只读 Agent Loop 已实现（默认仍用 stub），Linux Runtime 的 per-action cgroup v2（可选）、uid 切换、prlimit 资源限制和可选的 bubblewrap 命名空间/文件系统沙箱已实现，并已在真实 systemd 服务中验证。详见[当前实现状态](#当前实现状态)。
 
 本仓库采用**以文档为规格的全新 Go 实现（Greenfield Implementation）**：`docs/` 中经确认的核心规格、架构、安全设计和实施计划是需求与设计事实来源。仓库中任何现存 Python 代码均为 legacy prototype / historical reference，仅供理解历史背景；它不是 Go 实现的源代码基线，不构成功能兼容、架构复刻或逐文件迁移要求。
 
@@ -76,7 +76,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | Worker 认领、租约、重试、启动恢复、执行循环 | 已实现 |
 | 通用 Bash Session：超时、输出截断、调用预算、进程组回收、环境隔离 | 已实现（`shell.Session` 每次调用独立进程；`shell.Console` 提供常驻会话与跨调用状态） |
 | Shell 脚本辅助分析（AST） | 已实现：基于 `mvdan.cc/sh/v3` 识别写操作、间接执行和动态命令名；探针、`observe` 动作和验证命令在运行前做 fail-closed 校验。它不是策略引擎或沙箱 |
-| 调查：探针 → 证据、结论必须引用证据、提议动作 | 已实现（计划器是确定性替身） |
+| 调查：探针 → 证据、结论必须引用证据、提议动作 | 已实现；默认 `StubPlanner`，可配两阶段 `model` 或可选多轮只读 Agent Loop |
 | 确定性 Policy（R0–R4） | 已实现 |
 | 动作契约：规范化 JSON + SHA-256 摘要 | 已实现 |
 | 一次性审批：只存哈希、绑定契约摘要、单条 SQL 原子消费 | 已实现 |
@@ -87,6 +87,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
 | LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
+| 多轮只读诊断 Agent Loop | 已实现（可选）：`GRADOPS_AGENT_LOOP=true` 时模型每轮看到已保存的 Evidence，选择 `observe` 或 `finish`；支持单轮多条串行观察、轮数/调用/上下文预算、逐条 Evidence/Audit；默认关闭 |
 | per-action bubblewrap 沙箱 | 已实现并验证：`GRADOPS_SANDBOX=bubblewrap` 时使用独立 mount/PID/IPC/UTS/user/network namespace、只读根和按策略绑定的可写根；真实 systemd 服务上启动校验通过，任务探针在沙箱内完成并封存 |
 | Linux 隔离（systemd、文件系统、网络） | **已实现（可选）**：bubblewrap 沙箱提供 namespace、只读根和默认隔离网络；默认 `.env.example` 为 `none`，部署示例启用 `bubblewrap` |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
@@ -126,7 +127,7 @@ POST /api/tasks
 
 ### 已知限制（不是待办清单的装饰）
 
-- **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
+- **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；`GRADOPS_AGENT_LOOP=true` 才启用多轮 observe/finish，否则仍走两阶段。真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
 - **bubblewrap 沙箱**：代码已实现，部署示例启用 `bubblewrap`；真实 systemd 服务上启动探测通过，任务探针在沙箱内完成并封存。默认 `.env.example` 仍为 `none`，需要显式启用。
 - **隔离粒度**：`Session` 每次 `Run` 新建 cgroup/namespace；`Console` 的 cgroup/namespace 从 `NewConsole` 存活到 `Close`，一次调查的多条探针共享它，但不会跨 Action 复用。可写路径是全局 `GRADOPS_ALLOWED_ROOTS`，网络只有隔离/共享两种模式，没有 IP/端口/DNS allowlist；symlink/TOCTOU 未防护。
 - **per-action cgroup**：`cgroup-v2` 模式已安装到真实 systemd 主机，并在 delegated cgroup 上用 shell 集成测试验证了子 cgroup 创建、`memory.max`/`pids.max`/`cpu.max` 生效和超时清理；默认仍是 `direct`，只使用 prlimit。systemd unit 已配置 `Delegate=yes`、`DelegateSubgroup=supervisor`。
@@ -211,6 +212,10 @@ sudo scripts/verify-cgroup.sh
 | `GRADOPS_LLM_TIMEOUT` | `30s` | 单次 provider 请求超时，最长 5 分钟 |
 | `GRADOPS_LLM_MAX_RESPONSE_BYTES` | `1048576` | provider 响应体上限 |
 | `GRADOPS_LLM_MAX_PROBES` | `6` | 单次调查最多探针数 |
+| `GRADOPS_AGENT_LOOP` | `false` | 多轮 observe/finish；需要 `GRADOPS_PLANNER=model` |
+| `GRADOPS_AGENT_MAX_ROUNDS` | `6` | 最大决策轮数，1–20 |
+| `GRADOPS_AGENT_MAX_CALLS_PER_ROUND` | `3` | 每轮最多观察命令数，1–8 |
+| `GRADOPS_AGENT_CONTEXT_BYTES` | `32768` | 回传给模型的观察上下文上限 |
 | `GRADOPS_LLM_MAX_OBSERVATION_BYTES` | `4096` | 结论提示中单条观测的上限 |
 | `GRADOPS_LLM_MAX_TOKENS` | `1024` | 单次补全 token 上限 |
 

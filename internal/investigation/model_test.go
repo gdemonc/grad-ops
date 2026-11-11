@@ -306,3 +306,75 @@ func TestInvestigationStopsAtTheTotalTimeout(t *testing.T) {
 		t.Fatalf("the investigation did not stop near its budget: %s", elapsed)
 	}
 }
+
+func TestModelPlannerDecideParsesObserveAndFinish(t *testing.T) {
+	replies := []string{
+		`{"kind":"observe","commands":["uname -a","uptime"]}`,
+		`{"kind":"finish","summary":"the process is missing","citations":[1]}`,
+	}
+	var prompts []string
+	planner := testModelPlanner(t, func(_ context.Context, request llm.Request) (llm.Response, error) {
+		prompts = append(prompts, request.User)
+		return llm.Response{Content: replies[len(prompts)-1]}, nil
+	})
+
+	request := investigation.AgentRequest{
+		Request:          "java returns 502",
+		Round:            1,
+		MaxRounds:        4,
+		RemainingCalls:   3,
+		MaxCallsPerRound: 2,
+		Observations: []investigation.Observation{
+			{Index: 1, Command: "uname -a", Content: "Linux"},
+		},
+	}
+	decision, err := planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+	if decision.Kind != investigation.AgentObserve || len(decision.Commands) != 2 {
+		t.Fatalf("unexpected observe decision: %+v", decision)
+	}
+	if !strings.Contains(prompts[0], "TASK_REQUEST_JSON") || !strings.Contains(prompts[0], "[1] command: uname -a") {
+		t.Fatalf("prompt does not contain the bounded context: %s", prompts[0])
+	}
+
+	decision, err = planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if decision.Kind != investigation.AgentFinish || decision.Summary == "" || len(decision.Citations) != 1 {
+		t.Fatalf("unexpected finish decision: %+v", decision)
+	}
+}
+
+func TestModelPlannerDecideRejectsInvalidProtocol(t *testing.T) {
+	cases := map[string]string{
+		"unknown kind":  `{"kind":"act","commands":["uname"]}`,
+		"empty observe": `{"kind":"observe","commands":[]}`,
+		"blank command": `{"kind":"observe","commands":["  "]}`,
+		"too many":      `{"kind":"observe","commands":["a","b","c"]}`,
+		"empty summary": `{"kind":"finish","summary":"","citations":[1]}`,
+		"no citations":  `{"kind":"finish","summary":"done","citations":[]}`,
+		"bad citation":  `{"kind":"finish","summary":"done","citations":[2]}`,
+		"not json":      `I will observe`,
+	}
+	for name, reply := range cases {
+		t.Run(name, func(t *testing.T) {
+			planner := testModelPlanner(t, func(context.Context, llm.Request) (llm.Response, error) {
+				return llm.Response{Content: reply}, nil
+			})
+			_, err := planner.Decide(context.Background(), investigation.AgentRequest{
+				Request:          "check",
+				Round:            1,
+				MaxRounds:        3,
+				RemainingCalls:   2,
+				MaxCallsPerRound: 2,
+				Observations:     []investigation.Observation{{Index: 1, Command: "uname", Content: "Linux"}},
+			})
+			if !errors.Is(err, investigation.ErrInvalidPlan) {
+				t.Fatalf("expected ErrInvalidPlan, got %v", err)
+			}
+		})
+	}
+}

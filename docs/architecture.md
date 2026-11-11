@@ -82,7 +82,7 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 | `internal/api` | REST 接口与错误映射 |
 | `internal/e2e` | 贯穿真实组件的闭环测试 |
 
-当前 cgroup v2 与 bubblewrap 边界都在 `internal/shell` 中，尚未拆成单独的 `linux` 包。`internal/llm` 已提供 OpenAI 兼容客户端，`investigation.ModelPlanner` 提供两阶段模型计划；默认部署仍是 `StubPlanner`，`GRADOPS_PLANNER=model` 才启用模型。执行边界包括进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid/gid 切换、可选 per-action cgroup v2 和可选 bubblewrap 沙箱。`command` 已作为辅助分析包存在，但只校验探针/observe/验证命令的只读性，不是授权引擎。详见 [README 的当前实现状态](../README.md#当前实现状态)。
+当前 cgroup v2 与 bubblewrap 边界都在 `internal/shell` 中，尚未拆成单独的 `linux` 包。`internal/llm` 已提供 OpenAI 兼容客户端，`investigation.ModelPlanner` 提供两阶段模型计划和可选的 observe/finish Agent Loop；默认部署仍是 `StubPlanner`，`GRADOPS_PLANNER=model` 才启用模型，`GRADOPS_AGENT_LOOP=true` 才启用多轮循环。执行边界包括进程组、超时、输出上限、环境白名单、prlimit 资源限制、可选 uid/gid 切换、可选 per-action cgroup v2 和可选 bubblewrap 沙箱。`command` 已作为辅助分析包存在，但只校验探针/observe/验证命令的只读性，不是授权引擎。详见 [README 的当前实现状态](../README.md#当前实现状态)。
 
 ## 4. Linux Shell 与执行模型
 
@@ -115,6 +115,22 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 - `Session`：每次 `Run` 创建一个新的子 cgroup；启用 sandbox 时也创建一个新的 bubblewrap 命名空间。Executor 的动作和验证使用这种 per-call 边界。
 - `Console`：`NewConsole` 只创建一次 Bash、cgroup 和 sandbox，之后同一调查上下文内的多次探针共享它们，直到 `Close`。开启 `GRADOPS_PROBE_CONSOLE=true` 时，一次调查的多条探针共享状态，因此**不是每条探针独立的 namespace**；Console 不会跨独立 Action 复用，Executor 也从不使用 Console。
 - 可写路径来自全局 `GRADOPS_ALLOWED_ROOTS`，不是按 Action 动态授权；网络只有“默认隔离”和 `GRADOPS_SANDBOX_NETWORK=true` 共享宿主两种模式，没有 IP/端口/DNS allowlist；路径绑定没有解决 symlink/TOCTOU。
+
+### Agent Loop 的职责边界
+
+`GRADOPS_AGENT_LOOP=true` 时，`investigation.Service` 在同一个任务上循环：
+
+```text
+读取任务 + 已保存 Evidence → 模型决定 observe/finish
+  → observe：执行一条或多条串行只读命令，保存 Evidence + Audit
+  → finish：引用本任务 Evidence，封存任务
+```
+
+- Worker 仍只负责 durable job、lease 和恢复，不参与推理。
+- 每轮命令仍经过 `command.Analyze` 的只读辅助校验，并复用 `shell.Session`/`Console` 与现有 Runtime 配置。
+- Agent Loop 只做只读观察；任何副作用仍必须走既有 Policy → Contract → Approval → Executor → Verify 链。
+- 轮数、每轮调用数、总调用数、单次超时、总运行时长、单条输出和回传上下文都有上限；预算耗尽、重复命令、无效 JSON/动作、空命令和只读校验失败都会终止本次调查，而不是无限循环。
+- 每轮 Evidence 都关联同一 Task 并写 Audit；最终 `finish` 的 citations 必须指向本任务真实存在的 Evidence。
 
 1. API/Agent 主服务使用专用非 root 账号；Shell 执行账号与主服务身份分离。
 2. 每个任务或操作会话使用独立的 systemd transient service/scope 或等效 cgroup，限制 CPU、内存、Tasks/PID、执行时间、文件大小和输出量。

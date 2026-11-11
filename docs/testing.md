@@ -2,7 +2,7 @@
 
 本文说明每个安全属性对应哪些测试、在什么环境跑过、以及哪些属性还没有测试。它只记录实际执行过的结果：没有在某种环境下跑过的，写成没有跑过。
 
-最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、209 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针 `SEALED`，`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 通过；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
+最近一次运行：2026-11-10，Ubuntu 26.04.1 LTS，Go 1.27.3（最低版本 Go 1.26.0 另行验证）；GitHub Actions `Linux CI` 在 Ubuntu 24.04 上通过 build/vet/test/race 和最低版本 job（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)），`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过。当前共有 18 个测试包、219 个 `Test` 函数；per-action cgroup v2 已在真实 systemd delegated cgroup 上验证（`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`、`TestCgroupCPUQuotaIsApplied`；CPU 验证使用 `50000/100000`）；bubblewrap 沙箱已在真实 systemd 服务中完成启动探测和 worker 探针 `SEALED`，`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot` 通过；`scripts/demo.sh` 也在同一环境以真实二进制跑通了只读闭环；另用本地 fake OpenAI provider 跑通了一次 `GRADOPS_PLANNER=model` 的创建任务 → 模型选探针 → 模型结论 → 封存流程；并用真实二进制验证了设置 `GRADOPS_API_TOKEN` 后 health=200、无 token=401、带 token=200。
 
 ## 如何运行
 
@@ -21,6 +21,9 @@ GRADOPS_TEST_CGROUP_ROOT=/sys/fs/cgroup/system.slice/gradops.service \
 
 # 或者运行完整的部署检查
 sudo scripts/verify-cgroup.sh
+
+# 多轮只读 Agent Loop（mock LLM，不访问外部 provider）
+go test ./internal/investigation -run 'TestAgentLoop|TestModelPlannerAgentLoop|TestModelPlannerDecide' -v
 
 # bubblewrap 沙箱（bwrap 不可用的环境会 skip）
 go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoot -v
@@ -58,6 +61,7 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 | 两阶段模型计划器驱动真实调查，提案携带补偿动作 | `investigation/model_test.go`：`TestModelPlannerDrivesARealInvestigation`、`TestModelPlannerProposalCarriesCompensation` |
 | 主程序正确装配模型客户端 | `cmd/gradops/main_test.go`：`TestBuildPlannerWiresTheModelClient` |
 | 单次调查总时限覆盖探针与模型调用 | `investigation/model_test.go`：`TestInvestigationStopsAtTheTotalTimeout`；`config/config_test.go`：`TestInvestigationTimeoutDefaultsAndParses` |
+| 多轮只读 Agent Loop：动态改变调查方向、单轮多调用、预算与协议 | `investigation/agent_test.go`：`TestAgentLoopChangesDirectionAfterAnObservation`、`TestModelPlannerAgentLoopFollowsTheObservation`、`TestAgentLoopStopsAtTheRoundBudget`、`TestAgentLoopRejectsDuplicateAndNonReadOnlyCommands`；`investigation/model_test.go`：`TestModelPlannerDecideParsesObserveAndFinish`、`TestModelPlannerDecideRejectsInvalidProtocol`；`investigation/agent_context_test.go`：`TestBoundedAgentObservationsKeepsTheNewestWithinTheBudget`、`TestBoundedAgentObservationsReturnsEverythingWhenItFits`；`config/config_test.go`：`TestAgentLoopDefaultsOffAndParsesBounds`、`TestAgentLoopRequiresModelPlannerAndValidBounds` |
 | bubblewrap 沙箱参数、fail-closed 与真实 namespace 边界 | `shell/sandbox_args_test.go`：`TestSandboxArgsApplyTheFilesystemAndNamespaceBoundary`、`TestSandboxArgsCanShareTheNetwork`、`TestSandboxArgsRejectAWritableRoot`、`TestValidateSandboxFailsClosed`；`shell/sandbox_test.go`：`TestBubblewrapSessionHasNoHostNetworkOrWritableRoot`（真实 bwrap 上通过）；`config/config_test.go`：`TestSandboxDefaultsToNoneAndParsesOptions`、`TestSandboxRejectsUnknownModeAndRelativeBinary` |
 | cgroup v2 配置校验、fail-closed 与真实 cgroup 集成 | `shell/cgroup_test.go`：`TestValidateCgroupDisabledIsANoOp`、`TestValidateCgroupRejectsInvalidLimits`、`TestValidateCgroupFailsOutsideACgroupHierarchy`、`TestSessionRunsInADedicatedCgroup`、`TestCgroupTimeoutKillsTheGroup`（真实 systemd delegated cgroup 上通过）、`TestCgroupCPUQuotaIsApplied`（真实 cgroup 上以 `50000/100000` 通过）；`config/config_test.go`：`TestRuntimeModeDefaultsToDirect`、`TestCgroupRuntimeParsesLimits`、`TestRuntimeModeRejectsUnknownValues` |
 | 执行/回滚超时记为 UNKNOWN/失败但结果仍落库 | `executor/executor_test.go`：`TestExecutionCeilingIsRecordedAsUnknown`、`TestCancelledRequestStillRecordsTheUnknownOutcome`；`executor/recovery_test.go`：`TestRecoveryCeilingIsRecordedAsFailure`；`config/config_test.go`：`TestExecutionTimeoutDefaultsAndParses` |
@@ -95,6 +99,7 @@ go test ./internal/shell -run TestBubblewrapSessionHasNoHostNetworkOrWritableRoo
 - **bubblewrap 的逐项边界**：真实 systemd 服务启动探测通过，worker 探针在沙箱内 `SEALED`，root-only/loopback-only 集成测试通过；没有逐项验证每个可写根、DNS/网络副作用或所有外部命令的兼容性。
 - **cgroup 之外的隔离**：没有更细的 mount/network 策略；bubblewrap 默认关闭。
 - **worker 路径**：cgroup 验证使用 shell 集成测试，没有单独观察 Worker 任务产生的子 cgroup。
+- **Agent Loop 真实模型效果**：多轮协议和动态分支由 mock `llm.Completer`/脚本决策器验证，没有用真实 provider 跑过 Java 502 场景；模型延迟、真实提示注入和 token 消耗仍需实测。
 - **文件系统与网络隔离**：没有 Landlock、Bubblewrap、seccomp、只读挂载或网络策略。
 - **真实 `/var/log` 文件边界**：路径只在策略层做词法规整；没有 symlink、TOCTOU 或 `openat2` 测试。
 - **AST 分析的完整性**：分析器只识别已知命令和已知间接执行形式；未知命令、运行时展开、外部脚本和复杂数据流仍可能写文件。它被明确当作辅助校验，不是沙箱。

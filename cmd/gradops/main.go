@@ -181,20 +181,24 @@ func run() error {
 	investigator, err := investigation.New(db, engine,
 		planner,
 		investigation.Config{
-			Bash:             cfg.Bash,
-			BaseEnv:          baseEnv,
-			WorkDir:          cfg.WorkDir,
-			ContractWorkDir:  cfg.ContractWorkDir,
-			Timeout:          cfg.ProbeTimeout,
-			MaxOutputBytes:   cfg.MaxOutputBytes,
-			MaxCalls:         plannerMaxCalls(cfg),
-			PersistentProbes: cfg.PersistentProbes,
-			ScratchDir:       cfg.DataDir,
-			TotalTimeout:     cfg.InvestigationTimeout,
-			RunAs:            cfg.ExecutorUser,
-			Limits:           cfg.Limits,
-			Cgroup:           cfg.Cgroup,
-			Sandbox:          sandbox,
+			Bash:               cfg.Bash,
+			BaseEnv:            baseEnv,
+			WorkDir:            cfg.WorkDir,
+			ContractWorkDir:    cfg.ContractWorkDir,
+			Timeout:            cfg.ProbeTimeout,
+			MaxOutputBytes:     cfg.MaxOutputBytes,
+			MaxCalls:           plannerMaxCalls(cfg),
+			PersistentProbes:   cfg.PersistentProbes,
+			ScratchDir:         cfg.DataDir,
+			TotalTimeout:       cfg.InvestigationTimeout,
+			AgentLoop:          cfg.AgentLoop,
+			AgentRounds:        cfg.AgentRounds,
+			AgentCallsPerRound: cfg.AgentCallsPerRound,
+			AgentContextBytes:  cfg.AgentContextBytes,
+			RunAs:              cfg.ExecutorUser,
+			Limits:             cfg.Limits,
+			Cgroup:             cfg.Cgroup,
+			Sandbox:            sandbox,
 		})
 	if err != nil {
 		return fmt.Errorf("build investigation: %w", err)
@@ -245,6 +249,7 @@ func run() error {
 			FileSizeBytes:         cfg.Limits.MaxFileSizeBytes,
 			OpenFileLimit:         cfg.Limits.MaxOpenFiles,
 			Planner:               cfg.Planner,
+			AgentLoop:             cfg.AgentLoop,
 			RuntimeMode:           cfg.RuntimeMode,
 			CgroupMemoryMaxBytes:  cfg.Cgroup.MemoryMaxBytes,
 			CgroupPidsMax:         cfg.Cgroup.PidsMax,
@@ -349,6 +354,13 @@ func buildPlanner(cfg config.Config, logger *slog.Logger) (investigation.Planner
 // plannerMaxCalls gives the investigation shell a budget large enough for the
 // configured planner. The shell still enforces the limit.
 func plannerMaxCalls(cfg config.Config) int {
+	if cfg.AgentLoop {
+		calls := cfg.AgentRounds * cfg.AgentCallsPerRound
+		if calls > 100 {
+			return 100
+		}
+		return calls
+	}
 	if cfg.Planner == "model" {
 		return cfg.LLMMaxProbes
 	}

@@ -147,6 +147,17 @@ type Config struct {
 	// TotalTimeout bounds one investigation across every probe and model call.
 	// Zero uses the default.
 	TotalTimeout time.Duration
+	// AgentLoop selects the multi-round observe/finish loop. The planner must
+	// implement AgentDecider.
+	AgentLoop bool
+	// AgentRounds bounds the number of model decisions. Zero uses the default.
+	AgentRounds int
+	// AgentCallsPerRound bounds the observations in one decision. Zero uses the
+	// default.
+	AgentCallsPerRound int
+	// AgentContextBytes bounds the observation context sent to the decider.
+	// Zero uses the default.
+	AgentContextBytes int
 }
 
 // Result describes an investigation.
@@ -183,6 +194,29 @@ func New(db *store.DB, engine *policy.Engine, planner Planner, cfg Config) (*Ser
 	}
 	if cfg.TotalTimeout > 30*time.Minute {
 		return nil, fmt.Errorf("%w: total investigation timeout must not exceed 30m", ErrInvalidConfig)
+	}
+	if cfg.AgentLoop {
+		if _, ok := planner.(AgentDecider); !ok {
+			return nil, fmt.Errorf("%w: agent loop requires an AgentDecider", ErrInvalidConfig)
+		}
+		if cfg.AgentRounds == 0 {
+			cfg.AgentRounds = 6
+		}
+		if cfg.AgentCallsPerRound == 0 {
+			cfg.AgentCallsPerRound = 3
+		}
+		if cfg.AgentContextBytes == 0 {
+			cfg.AgentContextBytes = 32 << 10
+		}
+		if cfg.AgentRounds < 1 || cfg.AgentRounds > 20 {
+			return nil, fmt.Errorf("%w: agent rounds must be between 1 and 20", ErrInvalidConfig)
+		}
+		if cfg.AgentCallsPerRound < 1 || cfg.AgentCallsPerRound > 8 {
+			return nil, fmt.Errorf("%w: agent calls per round must be between 1 and 8", ErrInvalidConfig)
+		}
+		if cfg.AgentContextBytes < 1024 || cfg.AgentContextBytes > 1<<20 {
+			return nil, fmt.Errorf("%w: agent context bytes must be between 1024 and 1 MiB", ErrInvalidConfig)
+		}
 	}
 	if cfg.ContractWorkDir == "" {
 		cfg.ContractWorkDir = "/"
@@ -221,6 +255,10 @@ func (s *Service) Investigate(ctx context.Context, taskID int64) (Result, error)
 	request, err := s.loadRequest(ctx, taskID)
 	if err != nil {
 		return Result{}, err
+	}
+
+	if s.cfg.AgentLoop {
+		return s.investigateAgent(ctx, taskID, request)
 	}
 
 	plan, err := s.planner.Plan(ctx, request)

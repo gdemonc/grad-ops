@@ -168,6 +168,7 @@ export type SafetyRuntime = {
   file_size_bytes: number
   open_file_limit: number
   planner: string
+  agent_loop: boolean
   runtime_mode: string
   sandbox_mode: string
   cgroup_memory_max_bytes: number
