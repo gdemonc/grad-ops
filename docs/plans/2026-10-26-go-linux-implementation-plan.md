@@ -70,7 +70,7 @@
 ## Phase 4：受限执行、独立验证与恢复
 
 - [x] 实现唯一副作用执行入口。
-- [ ] Linux 文件操作加入 symlink、TOCTOU 和路径边界防护（当前仅在策略层做词法规整，符号链接在打开时未做校验）。
+- [ ] Linux 文件操作加入 symlink、TOCTOU 和路径边界防护（部分：`internal/fileops` 已实现 openat2/fd 相对打开与测试，尚未接入 Executor 的任意 Shell 副作用）。
 - [ ] 首期仅启用经过评审的受控副作用场景（例如日志备份与轮转）；所有 Shell 副作用须经过 Policy、契约、必要审批和 Runtime 边界控制，不开放任意提权。
 - [x] 执行结果和实际参数摘要写入 execution record。
 - [x] 验证阶段使用新的只读观测，禁止复用调查证据。
