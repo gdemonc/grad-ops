@@ -61,6 +61,7 @@ const (
 	envAgentMaxCalls   = "GRADOPS_AGENT_MAX_CALLS"
 	envAgentCalls      = "GRADOPS_AGENT_MAX_CALLS_PER_ROUND"
 	envAgentContext    = "GRADOPS_AGENT_CONTEXT_BYTES"
+	envLLMProvider     = "GRADOPS_LLM_PROVIDER"
 	envLLMBaseURL      = "GRADOPS_LLM_BASE_URL"
 	envLLMAPIKey       = "GRADOPS_LLM_API_KEY"
 	envLLMModel        = "GRADOPS_LLM_MODEL"
@@ -96,6 +97,7 @@ const (
 	defaultAgentMaxCalls = 40
 	defaultAgentCalls    = 5
 	defaultAgentContext  = 32 << 10
+	defaultLLMProvider   = "openai"
 	defaultLLMTimeout    = 30 * time.Second
 	defaultLLMResponse   = 1 << 20
 	defaultLLMMaxProbes  = 6
@@ -194,6 +196,8 @@ type Config struct {
 	AgentCallsPerRound int
 	// AgentContextBytes bounds the observation context sent to the model.
 	AgentContextBytes int
+	// LLMProvider selects the OpenAI-compatible preset: openai or deepseek.
+	LLMProvider string
 	// LLMBaseURL, LLMAPIKey and LLMModel configure the provider. The key is
 	// never logged or written to the database.
 	LLMBaseURL string
@@ -251,6 +255,7 @@ func Load() (Config, error) {
 		AgentMaxCalls:          defaultAgentMaxCalls,
 		AgentCallsPerRound:     defaultAgentCalls,
 		AgentContextBytes:      defaultAgentContext,
+		LLMProvider:            getenv(envLLMProvider, defaultLLMProvider),
 		LLMBaseURL:             getenv(envLLMBaseURL, ""),
 		LLMAPIKey:              strings.TrimSpace(os.Getenv(envLLMAPIKey)),
 		LLMModel:               getenv(envLLMModel, ""),
@@ -455,6 +460,19 @@ func Load() (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("%s must be stub or model (got %q)", envPlanner, cfg.Planner)
 	}
+	cfg.LLMProvider = strings.ToLower(strings.TrimSpace(cfg.LLMProvider))
+	switch cfg.LLMProvider {
+	case "openai":
+	case "deepseek":
+		if cfg.LLMBaseURL == "" {
+			cfg.LLMBaseURL = "https://api.deepseek.com/v1"
+		}
+		if cfg.LLMModel == "" {
+			cfg.LLMModel = "deepseek-chat"
+		}
+	default:
+		return Config{}, fmt.Errorf("%s must be openai or deepseek (got %q)", envLLMProvider, cfg.LLMProvider)
+	}
 	if raw := strings.TrimSpace(os.Getenv(envAgentLoop)); raw != "" {
 		value, err := parseBool(envAgentLoop, raw)
 		if err != nil {
@@ -504,6 +522,9 @@ func Load() (Config, error) {
 		}
 		if cfg.LLMModel == "" {
 			return Config{}, fmt.Errorf("%s is required when %s=model", envLLMModel, envPlanner)
+		}
+		if cfg.LLMProvider == "deepseek" && cfg.LLMAPIKey == "" {
+			return Config{}, fmt.Errorf("%s is required for the deepseek provider", envLLMAPIKey)
 		}
 	}
 

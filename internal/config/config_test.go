@@ -357,3 +357,29 @@ func TestAgentLoopRequiresModelPlannerAndValidBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestDeepSeekPresetFillsTheCompatibleEndpoint(t *testing.T) {
+	cfg, err := loadWith(t, map[string]string{
+		"GRADOPS_PLANNER":      "model",
+		"GRADOPS_LLM_PROVIDER": "deepseek",
+		"GRADOPS_LLM_API_KEY":  "test-key",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.LLMProvider != "deepseek" || cfg.LLMBaseURL != "https://api.deepseek.com/v1" || cfg.LLMModel != "deepseek-chat" {
+		t.Fatalf("unexpected deepseek preset: provider=%q base=%q model=%q", cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
+	}
+}
+
+func TestDeepSeekRequiresAnAPIKeyAndKnownProvider(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{
+		"GRADOPS_PLANNER":      "model",
+		"GRADOPS_LLM_PROVIDER": "deepseek",
+	}); err == nil {
+		t.Fatal("expected deepseek without an API key to be rejected")
+	}
+	if _, err := loadWith(t, map[string]string{"GRADOPS_LLM_PROVIDER": "unknown"}); err == nil {
+		t.Fatal("expected an unknown provider to be rejected")
+	}
+}

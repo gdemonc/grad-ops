@@ -137,6 +137,7 @@ POST /api/tasks
 - **资源限制依赖 util-linux**：`prlimit` 缺失时服务会拒绝启动；限制值默认适合只读探针和小文件，不保证兼容所有运维命令。
 - **时限**：`GRADOPS_INVESTIGATION_TIMEOUT` 限制调查阶段（探针 + 模型调用），默认 5 分钟；`GRADOPS_EXECUTION_TIMEOUT` 限制单个已批准动作/补偿的紧急执行上限，默认 5 分钟。审批等待和人工复核没有任务级时限。
 - **API 认证**：设置 `GRADOPS_API_TOKEN` 后所有 `/api` 路由要求 Bearer token；未设置时只允许 `127.0.0.1` / `localhost` / `::1` 监听，同机进程仍可无认证调用。当前没有用户、角色或按任务的细粒度授权。
+- **DeepSeek 联调**：`GRADOPS_LLM_PROVIDER=deepseek` 使用 `https://api.deepseek.com/v1` 和 `deepseek-chat`，API Key 只从环境变量读取；真实联调测试默认跳过，需显式设置 `GRADOPS_TEST_REAL_LLM=1`。
 - **模型数据边界**：`GRADOPS_PLANNER=model` 会把任务文本和截断后的探针观测发送给配置的 provider；启用 `GRADOPS_AGENT_LOOP=true` 时，每一轮都会把最近的 Evidence 再次发送。尚未实现提示内容的秘密扫描。API Key 不进入 shell 环境、日志或数据库，但 provider 本身必须被信任到相应程度。默认 `stub` 不发送任何外部数据。
 - **审计链**只防御朴素篡改，DB 拥有者仍可重写整条链；信任边界见[威胁模型](docs/threat-model.md)。
 
@@ -212,6 +213,7 @@ sudo scripts/verify-cgroup.sh
 | `GRADOPS_LLM_MODEL` | 空 | `model` 模式必填 |
 | `GRADOPS_LLM_TIMEOUT` | `30s` | 单次 provider 请求超时，最长 5 分钟 |
 | `GRADOPS_LLM_MAX_RESPONSE_BYTES` | `1048576` | provider 响应体上限 |
+| `GRADOPS_LLM_PROVIDER` | `openai` | `openai` 或 `deepseek`；deepseek 自动填充 base URL/model，且要求 API Key |
 | `GRADOPS_LLM_MAX_PROBES` | `6` | 单次调查最多探针数 |
 | `GRADOPS_AGENT_LOOP` | `false` | 多轮 observe/finish；需要 `GRADOPS_PLANNER=model` |
 | `GRADOPS_AGENT_MAX_ROUNDS` | `20` | 最大决策轮数，2–20；最后一轮只允许 finish |
