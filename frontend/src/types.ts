@@ -35,6 +35,7 @@ export type TaskSummary = {
 
 export type EvidenceItem = {
   id: string
+  attempt: number
   tool: string
   command: string
   observed_at: string

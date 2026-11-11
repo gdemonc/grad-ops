@@ -25,6 +25,10 @@ defineProps<{
       <span class="k">内容哈希</span>
       <span class="v hash">{{ shortHash(evidence.content_hash) }}</span>
     </div>
+    <div v-if="evidence.attempt > 0" class="kv">
+      <span class="k">Worker attempt</span>
+      <span class="v mono dim">{{ evidence.attempt }}</span>
+    </div>
     <div class="kv">
       <span class="k">采集时间</span>
       <span class="v mono dim">{{ formatTime(evidence.observed_at) }}</span>

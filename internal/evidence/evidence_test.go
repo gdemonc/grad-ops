@@ -168,3 +168,24 @@ func TestSaveRejectsUnusableRecords(t *testing.T) {
 		})
 	}
 }
+
+func TestEvidenceIsScopedByAttempt(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db)
+	first := save(t, db, evidence.Record{TaskID: taskID, Attempt: 1, Tool: "bash", Content: "attempt one"})
+	second := save(t, db, evidence.Record{TaskID: taskID, Attempt: 2, Tool: "bash", Content: "attempt two"})
+
+	records, err := evidence.New().ListByTaskAttempt(context.Background(), db, taskID, 1)
+	if err != nil {
+		t.Fatalf("list attempt 1: %v", err)
+	}
+	if len(records) != 1 || records[0].ID != first.ID || records[0].Attempt != 1 {
+		t.Fatalf("unexpected attempt 1 evidence: %+v", records)
+	}
+	if err := evidence.New().VerifyCitationsForAttempt(context.Background(), db, taskID, 1, []string{first.ID}); err != nil {
+		t.Fatalf("own attempt citation: %v", err)
+	}
+	if err := evidence.New().VerifyCitationsForAttempt(context.Background(), db, taskID, 1, []string{second.ID}); err == nil {
+		t.Fatal("evidence from another attempt must be rejected")
+	}
+}

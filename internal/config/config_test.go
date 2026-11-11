@@ -318,9 +318,9 @@ func TestAgentLoopDefaultsOffAndParsesBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.AgentLoop || cfg.AgentRounds != 6 || cfg.AgentCallsPerRound != 3 || cfg.AgentContextBytes != 32<<10 {
-		t.Fatalf("unexpected agent defaults: loop=%t rounds=%d calls=%d context=%d",
-			cfg.AgentLoop, cfg.AgentRounds, cfg.AgentCallsPerRound, cfg.AgentContextBytes)
+	if cfg.AgentLoop || cfg.AgentRounds != 20 || cfg.AgentMaxCalls != 40 || cfg.AgentCallsPerRound != 5 || cfg.AgentContextBytes != 32<<10 {
+		t.Fatalf("unexpected agent defaults: loop=%t rounds=%d max_calls=%d calls=%d context=%d",
+			cfg.AgentLoop, cfg.AgentRounds, cfg.AgentMaxCalls, cfg.AgentCallsPerRound, cfg.AgentContextBytes)
 	}
 
 	cfg, err = loadWith(t, map[string]string{
@@ -329,15 +329,16 @@ func TestAgentLoopDefaultsOffAndParsesBounds(t *testing.T) {
 		"GRADOPS_LLM_MODEL":                 "test-model",
 		"GRADOPS_AGENT_LOOP":                "true",
 		"GRADOPS_AGENT_MAX_ROUNDS":          "4",
+		"GRADOPS_AGENT_MAX_CALLS":           "8",
 		"GRADOPS_AGENT_MAX_CALLS_PER_ROUND": "2",
 		"GRADOPS_AGENT_CONTEXT_BYTES":       "8192",
 	})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !cfg.AgentLoop || cfg.AgentRounds != 4 || cfg.AgentCallsPerRound != 2 || cfg.AgentContextBytes != 8192 {
-		t.Fatalf("unexpected agent config: loop=%t rounds=%d calls=%d context=%d",
-			cfg.AgentLoop, cfg.AgentRounds, cfg.AgentCallsPerRound, cfg.AgentContextBytes)
+	if !cfg.AgentLoop || cfg.AgentRounds != 4 || cfg.AgentMaxCalls != 8 || cfg.AgentCallsPerRound != 2 || cfg.AgentContextBytes != 8192 {
+		t.Fatalf("unexpected agent config: loop=%t rounds=%d max_calls=%d calls=%d context=%d",
+			cfg.AgentLoop, cfg.AgentRounds, cfg.AgentMaxCalls, cfg.AgentCallsPerRound, cfg.AgentContextBytes)
 	}
 }
 
@@ -346,7 +347,8 @@ func TestAgentLoopRequiresModelPlannerAndValidBounds(t *testing.T) {
 		t.Fatal("expected agent loop with the stub planner to be rejected")
 	}
 	for key, value := range map[string]string{
-		"GRADOPS_AGENT_MAX_ROUNDS":          "0",
+		"GRADOPS_AGENT_MAX_ROUNDS":          "1",
+		"GRADOPS_AGENT_MAX_CALLS":           "0",
 		"GRADOPS_AGENT_MAX_CALLS_PER_ROUND": "9",
 		"GRADOPS_AGENT_CONTEXT_BYTES":       "512",
 	} {

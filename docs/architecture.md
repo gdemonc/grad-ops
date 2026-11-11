@@ -130,7 +130,8 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 - 每轮命令仍经过 `command.Analyze` 的只读辅助校验，并复用 `shell.Session`/`Console` 与现有 Runtime 配置。
 - Agent Loop 只做只读观察；任何副作用仍必须走既有 Policy → Contract → Approval → Executor → Verify 链。
 - 轮数、每轮调用数、总调用数、单次超时、总运行时长、单条输出和回传上下文都有上限；预算耗尽、重复命令、无效 JSON/动作、空命令和只读校验失败都会终止本次调查，而不是无限循环。
-- 每轮 Evidence 都关联同一 Task 并写 Audit；最终 `finish` 的 citations 必须指向本任务真实存在的 Evidence。
+- 观察预算或轮数耗尽时进入 finalization-only：只允许 `finish`，不允许再执行观察；模型无法给出合法 finish 时正常失败，不伪造结论。
+- 每轮 Evidence 都关联同一 Task 并写 Audit；Worker 重试使用新的 attempt，Evidence 按 Task + Attempt 关联，旧 attempt 不进入新 attempt 的上下文；最终 `finish` 的 citations 必须指向当前 attempt 真实存在的 Evidence。
 
 1. API/Agent 主服务使用专用非 root 账号；Shell 执行账号与主服务身份分离。
 2. 每个任务或操作会话使用独立的 systemd transient service/scope 或等效 cgroup，限制 CPU、内存、Tasks/PID、执行时间、文件大小和输出量。

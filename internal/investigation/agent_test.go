@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/gdemonc/grad-ops/internal/llm"
 	"github.com/gdemonc/grad-ops/internal/policy"
 	"github.com/gdemonc/grad-ops/internal/store"
+	"github.com/gdemonc/grad-ops/internal/worker"
 )
 
 type scriptedAgent struct {
@@ -40,23 +43,28 @@ type agentPlanner interface {
 	investigation.AgentDecider
 }
 
-func newAgentService(t *testing.T, db *store.DB, decider agentPlanner, rounds, calls int) *investigation.Service {
+func newAgentService(t *testing.T, db *store.DB, decider agentPlanner, rounds, calls int, maxCalls ...int) *investigation.Service {
 	t.Helper()
 	engine, err := policy.New(policy.Config{Version: "test-policy", AllowedRoots: []string{"/var/log"}})
 	if err != nil {
 		t.Fatalf("policy: %v", err)
 	}
 	workdir := t.TempDir()
+	totalCalls := rounds * calls
+	if len(maxCalls) > 0 {
+		totalCalls = maxCalls[0]
+	}
 	service, err := investigation.New(db, engine, decider, investigation.Config{
 		Bash:               requireBash(t),
 		BaseEnv:            map[string]string{"PATH": os.Getenv("PATH"), "HOME": workdir},
 		WorkDir:            workdir,
 		Timeout:            5 * time.Second,
 		MaxOutputBytes:     4096,
-		MaxCalls:           rounds * calls,
+		MaxCalls:           totalCalls,
 		TotalTimeout:       30 * time.Second,
 		AgentLoop:          true,
 		AgentRounds:        rounds,
+		AgentMaxCalls:      totalCalls,
 		AgentCallsPerRound: calls,
 		AgentContextBytes:  4096,
 	})
@@ -184,7 +192,7 @@ func TestAgentLoopRejectsDuplicateAndNonReadOnlyCommands(t *testing.T) {
 				}
 				return investigation.AgentDecision{Kind: investigation.AgentObserve, Commands: []string{command}}, nil
 			}
-			service := newAgentService(t, db, decider, 2, 1)
+			service := newAgentService(t, db, decider, 3, 1)
 			if _, err := service.Investigate(context.Background(), taskID); !errors.Is(err, investigation.ErrInvalidPlan) {
 				t.Fatalf("expected ErrInvalidPlan, got %v", err)
 			}
@@ -232,5 +240,152 @@ func TestModelPlannerAgentLoopFollowsTheObservation(t *testing.T) {
 	}
 	if calls != 3 {
 		t.Fatalf("expected three model calls, got %d", calls)
+	}
+}
+
+func TestAgentLoopFinalizesAfterTheObservationBudget(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+
+	decider := &scriptedAgent{}
+	decider.decide = func(request investigation.AgentRequest) (investigation.AgentDecision, error) {
+		switch request.Round {
+		case 1:
+			return investigation.AgentDecision{
+				Kind:     investigation.AgentObserve,
+				Commands: []string{"printf 'first observation'"},
+			}, nil
+		case 2:
+			if !request.FinalizeOnly || request.RemainingCalls != 0 {
+				return investigation.AgentDecision{}, fmt.Errorf("expected a zero-budget finalization request, got %+v", request)
+			}
+			return investigation.AgentDecision{
+				Kind:      investigation.AgentFinish,
+				Summary:   "the first observation is enough for this partial conclusion",
+				Citations: []int{1},
+			}, nil
+		default:
+			return investigation.AgentDecision{}, fmt.Errorf("unexpected round %d", request.Round)
+		}
+	}
+
+	service := newAgentService(t, db, decider, 4, 1, 1)
+	result, err := service.Investigate(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("investigate: %v", err)
+	}
+	if result.Status != domain.StatusSealed || len(result.EvidenceIDs) != 1 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestAgentLoopRetryUsesANewAttempt(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+
+	attempts := 0
+	decider := &scriptedAgent{}
+	decider.decide = func(request investigation.AgentRequest) (investigation.AgentDecision, error) {
+		if len(request.Observations) == 0 {
+			attempts++
+			command := fmt.Sprintf("printf 'attempt-%d'", attempts)
+			return investigation.AgentDecision{Kind: investigation.AgentObserve, Commands: []string{command}}, nil
+		}
+		if attempts == 1 {
+			return investigation.AgentDecision{}, errors.New("model timed out")
+		}
+		return investigation.AgentDecision{
+			Kind:      investigation.AgentFinish,
+			Summary:   fmt.Sprintf("attempt %d completed", attempts),
+			Citations: []int{1},
+		}, nil
+	}
+
+	service := newAgentService(t, db, decider, 3, 1, 2)
+	if err := service.Handle(context.Background(), worker.Job{
+		TaskID: taskID, Kind: domain.JobKindInvestigate, Attempts: 1,
+	}); err == nil {
+		t.Fatal("first attempt should fail")
+	}
+	if err := service.Handle(context.Background(), worker.Job{
+		TaskID: taskID, Kind: domain.JobKindInvestigate, Attempts: 2,
+	}); err != nil {
+		t.Fatalf("second attempt: %v", err)
+	}
+
+	first, err := evidence.New().ListByTaskAttempt(context.Background(), db, taskID, 1)
+	if err != nil {
+		t.Fatalf("list attempt 1: %v", err)
+	}
+	second, err := evidence.New().ListByTaskAttempt(context.Background(), db, taskID, 2)
+	if err != nil {
+		t.Fatalf("list attempt 2: %v", err)
+	}
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("attempt evidence: first=%d second=%d", len(first), len(second))
+	}
+	if first[0].Attempt != 1 || second[0].Attempt != 2 {
+		t.Fatalf("attempt tags are wrong: first=%+v second=%+v", first[0], second[0])
+	}
+}
+
+func TestAgentLoopObservesRealProcessAndLogState(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+	if _, err := db.Exec(`UPDATE tasks SET request_text = ? WHERE id = ?`, "Java service returns 502", taskID); err != nil {
+		t.Fatalf("set request: %v", err)
+	}
+
+	// A real process exits before the investigation, and the log file is a real
+	// file. The observation commands read actual /proc and filesystem state.
+	process := exec.Command("sleep", "30")
+	if err := process.Start(); err != nil {
+		t.Skipf("start fixture process: %v", err)
+	}
+	pid := process.Process.Pid
+	_ = process.Process.Kill()
+	_, _ = process.Process.Wait()
+	logPath := filepath.Join(t.TempDir(), "app.log")
+	if err := os.WriteFile(logPath, []byte("java exited 137\nkernel: oom-kill\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	decider := &scriptedAgent{}
+	decider.decide = func(request investigation.AgentRequest) (investigation.AgentDecision, error) {
+		switch len(request.Observations) {
+		case 0:
+			return investigation.AgentDecision{
+				Kind:     investigation.AgentObserve,
+				Commands: []string{fmt.Sprintf("ls /proc/%d", pid)},
+			}, nil
+		case 1:
+			if !strings.Contains(request.Observations[0].Content, "exit_code: 2") {
+				return investigation.AgentDecision{}, fmt.Errorf("killed process was still visible: %q", request.Observations[0].Content)
+			}
+			return investigation.AgentDecision{
+				Kind:     investigation.AgentObserve,
+				Commands: []string{fmt.Sprintf("cat %q", logPath)},
+			}, nil
+		case 2:
+			if !strings.Contains(request.Observations[1].Content, "oom-kill") {
+				return investigation.AgentDecision{}, fmt.Errorf("real log was not observed: %q", request.Observations[1].Content)
+			}
+			return investigation.AgentDecision{
+				Kind:      investigation.AgentFinish,
+				Summary:   "the process is gone and the real log shows an OOM kill",
+				Citations: []int{1, 2},
+			}, nil
+		default:
+			return investigation.AgentDecision{}, fmt.Errorf("unexpected observations: %d", len(request.Observations))
+		}
+	}
+
+	service := newAgentService(t, db, decider, 4, 2)
+	result, err := service.Investigate(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("investigate: %v", err)
+	}
+	if result.Status != domain.StatusSealed || len(result.EvidenceIDs) != 2 {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 }

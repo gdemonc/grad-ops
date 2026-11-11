@@ -87,7 +87,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
 | LLM 接入 | 已实现客户端与两阶段计划器：模型先选探针，看到证据后再给结论/动作；默认仍为 `StubPlanner`，真实 provider 未用密钥验证 |
-| 多轮只读诊断 Agent Loop | 已实现（可选）：`GRADOPS_AGENT_LOOP=true` 时模型每轮看到已保存的 Evidence，选择 `observe` 或 `finish`；支持单轮多条串行观察、轮数/调用/上下文预算、逐条 Evidence/Audit；默认关闭 |
+| 多轮只读诊断 Agent Loop | 已实现（可选）：`GRADOPS_AGENT_LOOP=true` 时模型每轮看到已保存的 Evidence，选择 `observe` 或 `finish`；支持单轮多条串行观察、轮数/调用/上下文预算、finalization-only 收尾、按 attempt 区分证据、逐条 Evidence/Audit；默认关闭 |
 | per-action bubblewrap 沙箱 | 已实现并验证：`GRADOPS_SANDBOX=bubblewrap` 时使用独立 mount/PID/IPC/UTS/user/network namespace、只读根和按策略绑定的可写根；真实 systemd 服务上启动校验通过，任务探针在沙箱内完成并封存 |
 | Linux 隔离（systemd、文件系统、网络） | **已实现（可选）**：bubblewrap 沙箱提供 namespace、只读根和默认隔离网络；默认 `.env.example` 为 `none`，部署示例启用 `bubblewrap` |
 | 前端联调 | 已实现：`frontend/` 已对齐 Go 接口，`npm run build`（含 `vue-tsc`）在 Ubuntu 上通过；dev 代理联调沿用之前的验证结果 |
@@ -129,6 +129,7 @@ POST /api/tasks
 
 - **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；`GRADOPS_AGENT_LOOP=true` 才启用多轮 observe/finish，否则仍走两阶段。真实 provider 的行为尚未用密钥验证，模型输出仍只被当作不可信输入。
 - **bubblewrap 沙箱**：代码已实现，部署示例启用 `bubblewrap`；真实 systemd 服务上启动探测通过，任务探针在沙箱内完成并封存。默认 `.env.example` 仍为 `none`，需要显式启用。
+- **Agent 重试**：Worker 每次尝试是独立 attempt；Evidence 按 Task + Attempt 关联，重试不自动恢复上一次的模型上下文，旧 attempt 只保留审计追溯。
 - **隔离粒度**：`Session` 每次 `Run` 新建 cgroup/namespace；`Console` 的 cgroup/namespace 从 `NewConsole` 存活到 `Close`，一次调查的多条探针共享它，但不会跨 Action 复用。可写路径是全局 `GRADOPS_ALLOWED_ROOTS`，网络只有隔离/共享两种模式，没有 IP/端口/DNS allowlist；symlink/TOCTOU 未防护。
 - **per-action cgroup**：`cgroup-v2` 模式已安装到真实 systemd 主机，并在 delegated cgroup 上用 shell 集成测试验证了子 cgroup 创建、`memory.max`/`pids.max`/`cpu.max` 生效和超时清理；默认仍是 `direct`，只使用 prlimit。systemd unit 已配置 `Delegate=yes`、`DelegateSubgroup=supervisor`。
 - **执行身份**：契约要求声明 `run_as`，并且拒绝 `root`。配置 `GRADOPS_EXECUTOR_USER` 后，服务会解析该账号并真正切换 uid/gid；非 root 进程无法切换到其他用户时启动失败。未配置时仍以服务进程身份运行，此时设置 `GRADOPS_REQUIRE_RUN_AS_MATCH=true` 会拒绝身份不一致的契约并写入 `execution.rejected`。uid 切换的成功路径尚未在 root 环境实测。
@@ -213,8 +214,9 @@ sudo scripts/verify-cgroup.sh
 | `GRADOPS_LLM_MAX_RESPONSE_BYTES` | `1048576` | provider 响应体上限 |
 | `GRADOPS_LLM_MAX_PROBES` | `6` | 单次调查最多探针数 |
 | `GRADOPS_AGENT_LOOP` | `false` | 多轮 observe/finish；需要 `GRADOPS_PLANNER=model` |
-| `GRADOPS_AGENT_MAX_ROUNDS` | `6` | 最大决策轮数，1–20 |
-| `GRADOPS_AGENT_MAX_CALLS_PER_ROUND` | `3` | 每轮最多观察命令数，1–8 |
+| `GRADOPS_AGENT_MAX_ROUNDS` | `20` | 最大决策轮数，2–20；最后一轮只允许 finish |
+| `GRADOPS_AGENT_MAX_CALLS` | `40` | 整个调查的最大观察命令数，1–200 |
+| `GRADOPS_AGENT_MAX_CALLS_PER_ROUND` | `5` | 每轮最多观察命令数，1–8 |
 | `GRADOPS_AGENT_CONTEXT_BYTES` | `32768` | 回传给模型的观察上下文上限 |
 | `GRADOPS_LLM_MAX_OBSERVATION_BYTES` | `4096` | 结论提示中单条观测的上限 |
 | `GRADOPS_LLM_MAX_TOKENS` | `1024` | 单次补全 token 上限 |

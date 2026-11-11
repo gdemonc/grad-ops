@@ -58,6 +58,7 @@ const (
 	envPlanner         = "GRADOPS_PLANNER"
 	envAgentLoop       = "GRADOPS_AGENT_LOOP"
 	envAgentRounds     = "GRADOPS_AGENT_MAX_ROUNDS"
+	envAgentMaxCalls   = "GRADOPS_AGENT_MAX_CALLS"
 	envAgentCalls      = "GRADOPS_AGENT_MAX_CALLS_PER_ROUND"
 	envAgentContext    = "GRADOPS_AGENT_CONTEXT_BYTES"
 	envLLMBaseURL      = "GRADOPS_LLM_BASE_URL"
@@ -91,8 +92,9 @@ const (
 	maxByteLimit         = 1 << 40
 	maxCountLimit        = 1_000_000
 	defaultPlanner       = "stub"
-	defaultAgentRounds   = 6
-	defaultAgentCalls    = 3
+	defaultAgentRounds   = 20
+	defaultAgentMaxCalls = 40
+	defaultAgentCalls    = 5
 	defaultAgentContext  = 32 << 10
 	defaultLLMTimeout    = 30 * time.Second
 	defaultLLMResponse   = 1 << 20
@@ -186,8 +188,9 @@ type Config struct {
 	Planner string
 	// AgentLoop selects the multi-round observe/finish investigation loop.
 	AgentLoop bool
-	// AgentRounds and AgentCallsPerRound bound the loop.
+	// AgentRounds, AgentMaxCalls and AgentCallsPerRound bound the loop.
 	AgentRounds        int
+	AgentMaxCalls      int
 	AgentCallsPerRound int
 	// AgentContextBytes bounds the observation context sent to the model.
 	AgentContextBytes int
@@ -245,6 +248,7 @@ func Load() (Config, error) {
 		},
 		Planner:                getenv(envPlanner, defaultPlanner),
 		AgentRounds:            defaultAgentRounds,
+		AgentMaxCalls:          defaultAgentMaxCalls,
 		AgentCallsPerRound:     defaultAgentCalls,
 		AgentContextBytes:      defaultAgentContext,
 		LLMBaseURL:             getenv(envLLMBaseURL, ""),
@@ -460,10 +464,17 @@ func Load() (Config, error) {
 	}
 	if raw := strings.TrimSpace(os.Getenv(envAgentRounds)); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > 20 {
-			return Config{}, fmt.Errorf("%s must be an integer between 1 and 20", envAgentRounds)
+		if err != nil || value < 2 || value > 20 {
+			return Config{}, fmt.Errorf("%s must be an integer between 2 and 20", envAgentRounds)
 		}
 		cfg.AgentRounds = value
+	}
+	if raw := strings.TrimSpace(os.Getenv(envAgentMaxCalls)); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			return Config{}, fmt.Errorf("%s must be an integer between 1 and 200", envAgentMaxCalls)
+		}
+		cfg.AgentMaxCalls = value
 	}
 	if raw := strings.TrimSpace(os.Getenv(envAgentCalls)); raw != "" {
 		value, err := strconv.Atoi(raw)
@@ -482,6 +493,9 @@ func Load() (Config, error) {
 	cfg.AgentContextBytes = int(contextBytes)
 	if cfg.AgentLoop && cfg.Planner != "model" {
 		return Config{}, fmt.Errorf("%s=true requires %s=model", envAgentLoop, envPlanner)
+	}
+	if cfg.AgentCallsPerRound > cfg.AgentMaxCalls {
+		return Config{}, fmt.Errorf("%s must not exceed %s", envAgentCalls, envAgentMaxCalls)
 	}
 
 	if cfg.Planner == "model" {

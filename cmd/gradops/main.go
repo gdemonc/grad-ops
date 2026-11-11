@@ -193,6 +193,7 @@ func run() error {
 			TotalTimeout:       cfg.InvestigationTimeout,
 			AgentLoop:          cfg.AgentLoop,
 			AgentRounds:        cfg.AgentRounds,
+			AgentMaxCalls:      cfg.AgentMaxCalls,
 			AgentCallsPerRound: cfg.AgentCallsPerRound,
 			AgentContextBytes:  cfg.AgentContextBytes,
 			RunAs:              cfg.ExecutorUser,
@@ -355,11 +356,7 @@ func buildPlanner(cfg config.Config, logger *slog.Logger) (investigation.Planner
 // configured planner. The shell still enforces the limit.
 func plannerMaxCalls(cfg config.Config) int {
 	if cfg.AgentLoop {
-		calls := cfg.AgentRounds * cfg.AgentCallsPerRound
-		if calls > 100 {
-			return 100
-		}
-		return calls
+		return cfg.AgentMaxCalls
 	}
 	if cfg.Planner == "model" {
 		return cfg.LLMMaxProbes

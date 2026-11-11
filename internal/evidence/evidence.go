@@ -29,8 +29,11 @@ var ErrHashMismatch = errors.New("evidence content does not match its hash")
 
 // Record is one observation.
 type Record struct {
-	ID          string
-	TaskID      int64
+	ID     string
+	TaskID int64
+	// Attempt is the worker attempt that produced the observation. Direct
+	// callers that are not part of a worker run use zero.
+	Attempt     int
 	Tool        string
 	Command     string
 	ObservedAt  time.Time
@@ -102,9 +105,9 @@ func (s *Store) Save(ctx context.Context, q Queryer, record *Record) error {
 	}
 
 	_, err := q.ExecContext(ctx,
-		`INSERT INTO evidence (id, task_id, tool, command, observed_at, content, content_hash, truncated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		record.ID, record.TaskID, record.Tool, record.Command,
+		`INSERT INTO evidence (id, task_id, attempt, tool, command, observed_at, content, content_hash, truncated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ID, record.TaskID, record.Attempt, record.Tool, record.Command,
 		domain.FormatTime(record.ObservedAt), record.Content, record.ContentHash, truncated,
 	)
 	if err != nil {
@@ -122,9 +125,9 @@ func (s *Store) Get(ctx context.Context, q Queryer, id string) (Record, error) {
 	)
 
 	err := q.QueryRowContext(ctx,
-		`SELECT id, task_id, tool, command, observed_at, content, content_hash, truncated
+		`SELECT id, task_id, attempt, tool, command, observed_at, content, content_hash, truncated
 		   FROM evidence WHERE id = ?`, id,
-	).Scan(&record.ID, &record.TaskID, &record.Tool, &record.Command,
+	).Scan(&record.ID, &record.TaskID, &record.Attempt, &record.Tool, &record.Command,
 		&observed, &record.Content, &record.ContentHash, &truncated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound
@@ -147,7 +150,7 @@ func (s *Store) Get(ctx context.Context, q Queryer, id string) (Record, error) {
 // ListByTask returns a task's evidence in observation order.
 func (s *Store) ListByTask(ctx context.Context, q Queryer, taskID int64) ([]Record, error) {
 	rows, err := q.QueryContext(ctx,
-		`SELECT id, task_id, tool, command, observed_at, content, content_hash, truncated
+		`SELECT id, task_id, attempt, tool, command, observed_at, content, content_hash, truncated
 		   FROM evidence WHERE task_id = ? ORDER BY observed_at, id`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)
@@ -161,7 +164,7 @@ func (s *Store) ListByTask(ctx context.Context, q Queryer, taskID int64) ([]Reco
 			observed  string
 			truncated int
 		)
-		if err := rows.Scan(&record.ID, &record.TaskID, &record.Tool, &record.Command,
+		if err := rows.Scan(&record.ID, &record.TaskID, &record.Attempt, &record.Tool, &record.Command,
 			&observed, &record.Content, &record.ContentHash, &truncated); err != nil {
 			return nil, fmt.Errorf("scan evidence: %w", err)
 		}
@@ -177,12 +180,51 @@ func (s *Store) ListByTask(ctx context.Context, q Queryer, taskID int64) ([]Reco
 	return records, nil
 }
 
+// ListByTaskAttempt returns the evidence produced by one worker attempt.
+func (s *Store) ListByTaskAttempt(ctx context.Context, q Queryer, taskID int64, attempt int) ([]Record, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT id, task_id, attempt, tool, command, observed_at, content, content_hash, truncated
+		   FROM evidence WHERE task_id = ? AND attempt = ? ORDER BY observed_at, id`, taskID, attempt)
+	if err != nil {
+		return nil, fmt.Errorf("list evidence attempt: %w", err)
+	}
+	defer rows.Close()
+
+	var records []Record
+	for rows.Next() {
+		var (
+			record    Record
+			observed  string
+			truncated int
+		)
+		if err := rows.Scan(&record.ID, &record.TaskID, &record.Attempt, &record.Tool, &record.Command,
+			&observed, &record.Content, &record.ContentHash, &truncated); err != nil {
+			return nil, fmt.Errorf("scan evidence attempt: %w", err)
+		}
+		if record.ObservedAt, err = domain.ParseTime(observed); err != nil {
+			return nil, fmt.Errorf("evidence time: %w", err)
+		}
+		record.Truncated = truncated != 0
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list evidence attempt: %w", err)
+	}
+	return records, nil
+}
+
 // VerifyCitations checks that every cited id exists, belongs to the task and
 // still matches its hash.
 //
 // A conclusion that cites an id the database does not have, or that cites
 // evidence from another task, is ungrounded and must not be accepted.
 func (s *Store) VerifyCitations(ctx context.Context, q Queryer, taskID int64, ids []string) error {
+	return s.VerifyCitationsForAttempt(ctx, q, taskID, -1, ids)
+}
+
+// VerifyCitationsForAttempt additionally rejects evidence from another attempt
+// when attempt is non-negative.
+func (s *Store) VerifyCitationsForAttempt(ctx context.Context, q Queryer, taskID int64, attempt int, ids []string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("a conclusion must cite at least one piece of evidence")
 	}
@@ -207,6 +249,9 @@ func (s *Store) VerifyCitations(ctx context.Context, q Queryer, taskID int64, id
 		}
 		if record.TaskID != taskID {
 			return fmt.Errorf("cited evidence %q belongs to another task", id)
+		}
+		if attempt >= 0 && record.Attempt != attempt {
+			return fmt.Errorf("cited evidence %q belongs to another attempt", id)
 		}
 	}
 	return nil

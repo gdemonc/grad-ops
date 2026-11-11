@@ -46,6 +46,9 @@ type AgentRequest struct {
 	RemainingCalls int
 	// MaxCallsPerRound bounds Commands in one observe decision.
 	MaxCallsPerRound int
+	// FinalizeOnly means the observation budget or round budget is exhausted.
+	// The decider may only return finish; observe is rejected.
+	FinalizeOnly bool
 	// Observations are the most recent observations that fit the context
 	// budget. Omitted counts older observations that were dropped.
 	Observations []Observation
@@ -63,7 +66,7 @@ type AgentDecider interface {
 // Evidence is saved and audited after every individual observation, not only
 // after the final conclusion. If the loop fails midway the task stays in
 // INVESTIGATING; the worker decides whether a read-only retry is appropriate.
-func (s *Service) investigateAgent(ctx context.Context, taskID int64, request string) (result Result, runErr error) {
+func (s *Service) investigateAgent(ctx context.Context, taskID int64, request string, attempt int) (result Result, runErr error) {
 	decider, ok := s.planner.(AgentDecider)
 	if !ok {
 		return Result{}, fmt.Errorf("%w: planner does not implement AgentDecider", ErrInvalidConfig)
@@ -89,22 +92,24 @@ func (s *Service) investigateAgent(ctx context.Context, taskID int64, request st
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
 		}
-		if calls >= s.cfg.MaxCalls {
-			return Result{}, fmt.Errorf("%w: call budget used before round %d", ErrAgentBudget, round)
-		}
-
+		finalize := calls >= s.cfg.AgentMaxCalls || round == s.cfg.AgentRounds
 		history, omitted := s.boundedAgentObservations(observations)
 		decision, err := decider.Decide(ctx, AgentRequest{
 			Request:          request,
 			Round:            round,
 			MaxRounds:        s.cfg.AgentRounds,
-			RemainingCalls:   s.cfg.MaxCalls - calls,
+			RemainingCalls:   s.cfg.AgentMaxCalls - calls,
 			MaxCallsPerRound: s.cfg.AgentCallsPerRound,
+			FinalizeOnly:     finalize,
 			Observations:     history,
 			Omitted:          omitted,
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("agent round %d: %w", round, err)
+		}
+
+		if finalize && decision.Kind != AgentFinish {
+			return Result{}, fmt.Errorf("%w: finalization round requires finish, got %q", ErrAgentBudget, decision.Kind)
 		}
 
 		switch decision.Kind {
@@ -115,8 +120,8 @@ func (s *Service) investigateAgent(ctx context.Context, taskID int64, request st
 			if len(decision.Commands) > s.cfg.AgentCallsPerRound {
 				return Result{}, fmt.Errorf("%w: observe returned %d commands, limit is %d", ErrInvalidPlan, len(decision.Commands), s.cfg.AgentCallsPerRound)
 			}
-			if calls+len(decision.Commands) > s.cfg.MaxCalls {
-				return Result{}, fmt.Errorf("%w: %d commands exceed the remaining %d calls", ErrAgentBudget, len(decision.Commands), s.cfg.MaxCalls-calls)
+			if calls+len(decision.Commands) > s.cfg.AgentMaxCalls {
+				return Result{}, fmt.Errorf("%w: %d commands exceed the remaining %d calls", ErrAgentBudget, len(decision.Commands), s.cfg.AgentMaxCalls-calls)
 			}
 			if err := validateProbes(decision.Commands); err != nil {
 				return Result{}, err
@@ -132,6 +137,7 @@ func (s *Service) investigateAgent(ctx context.Context, taskID int64, request st
 				}
 				record := evidence.Record{
 					TaskID:     taskID,
+					Attempt:    attempt,
 					Tool:       "probe",
 					Command:    command,
 					ObservedAt: s.now().UTC(),
@@ -163,7 +169,7 @@ func (s *Service) investigateAgent(ctx context.Context, taskID int64, request st
 			if len(decision.Citations) == 0 {
 				return Result{}, fmt.Errorf("%w: finish must cite at least one observation", ErrUngrounded)
 			}
-			return s.finishAgent(ctx, taskID, summary, decision.Citations, records, round, calls)
+			return s.finishAgent(ctx, taskID, attempt, summary, decision.Citations, records, round, calls)
 
 		default:
 			return Result{}, fmt.Errorf("%w: unknown agent decision %q", ErrInvalidPlan, decision.Kind)
@@ -238,6 +244,7 @@ func (s *Service) saveAgentObservation(ctx context.Context, taskID int64, record
 		payload, err := json.Marshal(map[string]any{
 			"round":       round,
 			"call":        call,
+			"attempt":     record.Attempt,
 			"evidence_id": record.ID,
 			"command":     record.Command,
 			"exit_code":   result.ExitCode,
@@ -258,7 +265,7 @@ func (s *Service) saveAgentObservation(ctx context.Context, taskID int64, record
 	})
 }
 
-func (s *Service) finishAgent(ctx context.Context, taskID int64, summary string, citations []int, records []evidence.Record, rounds, calls int) (Result, error) {
+func (s *Service) finishAgent(ctx context.Context, taskID int64, attempt int, summary string, citations []int, records []evidence.Record, rounds, calls int) (Result, error) {
 	ids, err := s.citations(Plan{Citations: citations}, records)
 	if err != nil {
 		return Result{}, err
@@ -271,7 +278,7 @@ func (s *Service) finishAgent(ctx context.Context, taskID int64, summary string,
 	}
 
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
-		if err := s.evidence.VerifyCitations(ctx, tx, taskID, ids); err != nil {
+		if err := s.evidence.VerifyCitationsForAttempt(ctx, tx, taskID, attempt, ids); err != nil {
 			return fmt.Errorf("%w: %v", ErrUngrounded, err)
 		}
 		if err := s.transitionTask(ctx, tx, taskID, domain.StatusSealed, "", summary, now); err != nil {
@@ -280,6 +287,7 @@ func (s *Service) finishAgent(ctx context.Context, taskID int64, summary string,
 		payload, err := json.Marshal(map[string]any{
 			"summary":      summary,
 			"evidence_ids": ids,
+			"attempt":      attempt,
 			"rounds":       rounds,
 			"calls":        calls,
 		})

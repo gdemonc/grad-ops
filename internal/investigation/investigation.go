@@ -152,6 +152,9 @@ type Config struct {
 	AgentLoop bool
 	// AgentRounds bounds the number of model decisions. Zero uses the default.
 	AgentRounds int
+	// AgentMaxCalls bounds the total observations across all rounds. Zero uses
+	// the default.
+	AgentMaxCalls int
 	// AgentCallsPerRound bounds the observations in one decision. Zero uses the
 	// default.
 	AgentCallsPerRound int
@@ -200,19 +203,28 @@ func New(db *store.DB, engine *policy.Engine, planner Planner, cfg Config) (*Ser
 			return nil, fmt.Errorf("%w: agent loop requires an AgentDecider", ErrInvalidConfig)
 		}
 		if cfg.AgentRounds == 0 {
-			cfg.AgentRounds = 6
+			cfg.AgentRounds = 20
+		}
+		if cfg.AgentMaxCalls == 0 {
+			cfg.AgentMaxCalls = 40
 		}
 		if cfg.AgentCallsPerRound == 0 {
-			cfg.AgentCallsPerRound = 3
+			cfg.AgentCallsPerRound = 5
 		}
 		if cfg.AgentContextBytes == 0 {
 			cfg.AgentContextBytes = 32 << 10
 		}
-		if cfg.AgentRounds < 1 || cfg.AgentRounds > 20 {
-			return nil, fmt.Errorf("%w: agent rounds must be between 1 and 20", ErrInvalidConfig)
+		if cfg.AgentRounds < 2 || cfg.AgentRounds > 20 {
+			return nil, fmt.Errorf("%w: agent rounds must be between 2 and 20", ErrInvalidConfig)
 		}
-		if cfg.AgentCallsPerRound < 1 || cfg.AgentCallsPerRound > 8 {
-			return nil, fmt.Errorf("%w: agent calls per round must be between 1 and 8", ErrInvalidConfig)
+		if cfg.AgentMaxCalls < 1 || cfg.AgentMaxCalls > 200 {
+			return nil, fmt.Errorf("%w: agent max calls must be between 1 and 200", ErrInvalidConfig)
+		}
+		if cfg.AgentCallsPerRound < 1 || cfg.AgentCallsPerRound > 8 || cfg.AgentCallsPerRound > cfg.AgentMaxCalls {
+			return nil, fmt.Errorf("%w: agent calls per round must be between 1 and 8 and not exceed max calls", ErrInvalidConfig)
+		}
+		if cfg.MaxCalls < cfg.AgentMaxCalls {
+			return nil, fmt.Errorf("%w: shell max calls must not be less than agent max calls", ErrInvalidConfig)
 		}
 		if cfg.AgentContextBytes < 1024 || cfg.AgentContextBytes > 1<<20 {
 			return nil, fmt.Errorf("%w: agent context bytes must be between 1024 and 1 MiB", ErrInvalidConfig)
@@ -240,12 +252,17 @@ func (s *Service) Handle(ctx context.Context, job worker.Job) error {
 	if job.Kind != domain.JobKindInvestigate {
 		return fmt.Errorf("investigation cannot handle job kind %s", job.Kind)
 	}
-	_, err := s.Investigate(ctx, job.TaskID)
+	_, err := s.investigate(ctx, job.TaskID, job.Attempts)
 	return err
 }
 
-// Investigate runs the plan for a task and records its outcome.
+// Investigate runs one investigation outside a worker attempt. Direct callers
+// use attempt zero; the worker path tags evidence with job.Attempts.
 func (s *Service) Investigate(ctx context.Context, taskID int64) (Result, error) {
+	return s.investigate(ctx, taskID, 0)
+}
+
+func (s *Service) investigate(ctx context.Context, taskID int64, attempt int) (Result, error) {
 	if s.cfg.TotalTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.cfg.TotalTimeout)
@@ -258,7 +275,7 @@ func (s *Service) Investigate(ctx context.Context, taskID int64) (Result, error)
 	}
 
 	if s.cfg.AgentLoop {
-		return s.investigateAgent(ctx, taskID, request)
+		return s.investigateAgent(ctx, taskID, request, attempt)
 	}
 
 	plan, err := s.planner.Plan(ctx, request)
@@ -282,7 +299,7 @@ func (s *Service) Investigate(ctx context.Context, taskID int64) (Result, error)
 		}
 	}
 
-	observations, err := s.probe(ctx, plan.Probes)
+	observations, err := s.probe(ctx, plan.Probes, attempt)
 	if err != nil {
 		return Result{}, err
 	}
@@ -395,7 +412,7 @@ type probeRunner interface {
 	Run(ctx context.Context, script string) (shell.Result, error)
 }
 
-func (s *Service) probe(ctx context.Context, probes []string) (records []evidence.Record, runErr error) {
+func (s *Service) probe(ctx context.Context, probes []string, attempt int) (records []evidence.Record, runErr error) {
 	runner, release, err := s.probeShell()
 	if err != nil {
 		return nil, err
@@ -413,6 +430,7 @@ func (s *Service) probe(ctx context.Context, probes []string) (records []evidenc
 			return nil, fmt.Errorf("run probe %q: %w", command, err)
 		}
 		records = append(records, evidence.Record{
+			Attempt:    attempt,
 			Tool:       "probe",
 			Command:    command,
 			ObservedAt: s.now().UTC(),

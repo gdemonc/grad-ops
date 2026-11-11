@@ -378,3 +378,62 @@ func TestModelPlannerDecideRejectsInvalidProtocol(t *testing.T) {
 		})
 	}
 }
+
+func TestModelPlannerDecideFinalizationOnlyAllowsFinish(t *testing.T) {
+	var prompts []string
+	replies := []string{
+		`{"kind":"finish","summary":"the evidence is sufficient","citations":[1]}`,
+		`{"kind":"observe","commands":["uname -a"]}`,
+	}
+	planner := testModelPlanner(t, func(_ context.Context, request llm.Request) (llm.Response, error) {
+		prompts = append(prompts, request.User)
+		return llm.Response{Content: replies[len(prompts)-1]}, nil
+	})
+	request := investigation.AgentRequest{
+		Request:          "check",
+		Round:            4,
+		MaxRounds:        4,
+		RemainingCalls:   0,
+		MaxCallsPerRound: 2,
+		FinalizeOnly:     true,
+		Observations:     []investigation.Observation{{Index: 1, Command: "uname", Content: "Linux"}},
+	}
+	decision, err := planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if decision.Kind != investigation.AgentFinish {
+		t.Fatalf("expected finish, got %+v", decision)
+	}
+	if !strings.Contains(prompts[0], "Only finish is allowed") {
+		t.Fatalf("finalization prompt is missing its restriction: %s", prompts[0])
+	}
+
+	if _, err := planner.Decide(context.Background(), request); !errors.Is(err, investigation.ErrInvalidPlan) {
+		t.Fatalf("expected observe in finalization to be rejected, got %v", err)
+	}
+}
+
+func TestModelPlannerDecideExplainsOmittedObservations(t *testing.T) {
+	var prompt string
+	planner := testModelPlanner(t, func(_ context.Context, request llm.Request) (llm.Response, error) {
+		prompt = request.User
+		return llm.Response{Content: `{"kind":"finish","summary":"grounded","citations":[3]}`}, nil
+	})
+	_, err := planner.Decide(context.Background(), investigation.AgentRequest{
+		Request:          "check",
+		Round:            2,
+		MaxRounds:        4,
+		RemainingCalls:   2,
+		MaxCallsPerRound: 2,
+		Observations:     []investigation.Observation{{Index: 3, Command: "uname", Content: "Linux"}},
+		Omitted:          2,
+	})
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if !strings.Contains(prompt, "The first 2 observations were omitted") ||
+		!strings.Contains(prompt, "Visible observation indexes retain their original numbering") {
+		t.Fatalf("omitted-context prompt is wrong: %s", prompt)
+	}
+}
