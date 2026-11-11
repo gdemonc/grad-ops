@@ -55,7 +55,8 @@ func (s *Service) executeFileTarget(ctx context.Context, proposal storedProposal
 	switch {
 	case runErr == nil:
 		// Succeeded.
-	case errors.Is(runErr, fileops.ErrIdentityMismatch), errors.Is(runErr, fileops.ErrUnsafePath):
+	case errors.Is(runErr, fileops.ErrIdentityMismatch), errors.Is(runErr, fileops.ErrUnsafePath),
+		errors.Is(runErr, fileops.ErrUnsupportedFileType):
 		// Nothing was written: the target identity or path constraints failed
 		// before the append. This is a definite failure, not an unknown side
 		// effect.

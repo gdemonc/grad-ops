@@ -84,7 +84,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | Linux 资源限制：CPU、地址空间、进程数、文件大小、文件描述符 | 已实现：通过 `prlimit` 在 shell 启动前应用，默认开启，可逐项设为 `0` 关闭 |
 | per-action cgroup v2 边界 | 已实现并验证：`GRADOPS_RUNTIME=cgroup-v2` 时每个 shell 启动在独立子 cgroup，设置内存/进程/CPU 限制；真实 systemd delegated cgroup 上验证了 `memory.max`、`pids.max`、`cpu.max` 和超时清理。kill/close 失败会向调用者报告，启动时清理残留的 `gradops-*` 子 cgroup |
 | 执行身份切换 | 部分实现：配置 `GRADOPS_EXECUTOR_USER` 后以该身份运行探针、动作和验证；非 root 无法切换时启动失败。未配置时仍以服务进程身份运行 |
-| 文件目标路径安全 | 部分实现：新增 `internal/fileops`，用 `openat2(RESOLVE_BENEATH|RESOLVE_NO_MAGICLINKS|RESOLVE_NO_SYMLINKS|RESOLVE_NO_XDEV)` 做 fd 相对打开并返回 inode 身份；Executor 已接入最小受控 `fileops` append，目标身份变化会拒绝执行；任意 Bash 副作用仍未接入 |
+| 文件目标路径安全 | 部分实现：`internal/fileops` 使用 openat2 做 fd 相对打开和身份绑定；Executor 已接入受控 `fileops` append，HTTP → Worker → Approval → Executor E2E 通过；只支持已有普通文件追加，任意 Bash 副作用仍未接入 |
 | 独立验证：执行后重新观测，通过则封存 | 已实现 |
 | 回滚 / 补偿动作 | 已实现：契约内声明补偿动作，验证失败 → `ROLLING_BACK` → `ROLLED_BACK` / `RECOVERY_FAILED` |
 | LLM 接入 | 已实现客户端、两阶段计划器和可选 Agent Loop；DeepSeek `deepseek-flash` 已用真实 Key 联调通过，默认仍为 `StubPlanner`，其他 provider/model 未验证 |

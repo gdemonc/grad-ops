@@ -187,7 +187,7 @@ func Bind(root, relative string) (Target, error) {
 	if err != nil {
 		return Target{}, err
 	}
-	file, err := r.Read(relative)
+	file, err := r.Open(relative, unix.O_PATH, 0)
 	if err != nil {
 		return Target{}, err
 	}
@@ -228,15 +228,43 @@ func (t Target) OpenVerified(flags int, mode os.FileMode) (*os.File, error) {
 			ErrIdentityMismatch, t.Root, rootIdentity.Dev, rootIdentity.Ino,
 			t.RootIdentity.Dev, t.RootIdentity.Ino)
 	}
-	file, err := r.Open(t.Relative, flags|syscall.O_NONBLOCK, uint32(mode.Perm()))
+	// O_PATH does not invoke device open handlers and cannot block on a FIFO.
+	// Check type and identity before opening a writable file description.
+	pathFile, err := r.Open(t.Relative, unix.O_PATH, 0)
 	_ = r.Close()
 	if err != nil {
-		if errors.Is(err, syscall.ENXIO) {
-			return nil, fmt.Errorf("%w: %s/%s cannot be opened as a regular file", ErrUnsupportedFileType, t.Root, t.Relative)
-		}
 		return nil, err
 	}
-	info, err := file.Stat()
+	info, err := pathFile.Stat()
+	if err != nil {
+		_ = pathFile.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = pathFile.Close()
+		return nil, fmt.Errorf("%w: %s/%s is %s", ErrUnsupportedFileType, t.Root, t.Relative, info.Mode())
+	}
+	pathIdentity, err := Stat(pathFile)
+	if err != nil {
+		_ = pathFile.Close()
+		return nil, err
+	}
+	if pathIdentity.Dev != t.Identity.Dev || pathIdentity.Ino != t.Identity.Ino {
+		_ = pathFile.Close()
+		return nil, fmt.Errorf("%w: %s/%s is %d:%d, bound %d:%d",
+			ErrIdentityMismatch, t.Root, t.Relative,
+			pathIdentity.Dev, pathIdentity.Ino, t.Identity.Dev, t.Identity.Ino)
+	}
+
+	// Re-open through the already-open descriptor's /proc entry, not the
+	// original path. The identity is checked again after reopen.
+	fdPath := fmt.Sprintf("/proc/self/fd/%d", pathFile.Fd())
+	file, err := os.OpenFile(fdPath, flags|syscall.O_NONBLOCK, mode.Perm())
+	_ = pathFile.Close()
+	if err != nil {
+		return nil, fmt.Errorf("%w: reopen %s/%s: %v", ErrUnsafePath, t.Root, t.Relative, err)
+	}
+	info, err = file.Stat()
 	if err != nil {
 		_ = file.Close()
 		return nil, err

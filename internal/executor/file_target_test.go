@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -212,5 +213,32 @@ func TestFileTargetRejectsADifferentRunAs(t *testing.T) {
 	}
 	if string(content) != "original\n" {
 		t.Fatalf("file was modified: %q", content)
+	}
+}
+
+func TestFileTargetRejectsANonRegularReplacementAsFailed(t *testing.T) {
+	h, root := newFileHarness(t)
+	path := filepath.Join(root, "app.log")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	c, digest := buildFileContract(t, root, "app.log", "must-not-append\n")
+	taskID, proposalID := seed(t, h.db, c, digest)
+	token := h.approve(t, taskID, proposalID, digest)
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	outcome, err := h.service.Execute(context.Background(), executor.Request{
+		ProposalID: proposalID, ApprovalToken: token, Actor: "worker-1",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Status != executor.StatusFailed {
+		t.Fatalf("expected FAILED for a non-regular target, got %s", outcome.Status)
 	}
 }
