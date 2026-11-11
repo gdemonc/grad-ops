@@ -96,7 +96,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 
 ### 已验证 / 未验证
 
-- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存）；另于 2026-11-11 用真实 DeepSeek `deepseek-flash` 跑通 `TestDeepSeekAgentLoopRealProvider`，模型执行 `wc`、`grep`、`tail` 三条只读观察并正确总结 fixture 日志；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）；per-action cgroup v2 在真实 systemd delegated cgroup 上通过 shell 集成测试（`memory.max=67108864`、`pids.max=32`、`cpu.max=50000 100000`、超时清理、无残留子 cgroup）；bubblewrap 沙箱在真实 systemd 服务中完成启动探测，worker 探针在沙箱内执行并到达 `SEALED`，root-only/loopback-only 集成测试通过。
+- **已验证（Ubuntu 26.04.1 LTS + Go 1.27.3，2026-11-10）**：`go build ./...`、`go vet ./...`、`go test ./... -count=1` 与 `go test -race ./... -count=1` 全部通过；`scripts/demo.sh` 以真实二进制跑通"创建任务 → Worker 调查 → 封存 → 证据/时间线 → 审计链校验"。prlimit 的资源限制由 `ulimit` 断言验证；非 root 进程无法切换到其他用户时在启动期失败；LLM 客户端与两阶段计划器由本地 `httptest`、函数替身和一次本地 fake provider 端到端冒烟验证（任务以模型结论封存）；另于 2026-11-11 用真实 DeepSeek `deepseek-flash` 跑通 `TestDeepSeekAgentLoopRealProvider`，模型执行 `wc`、`grep`、`tail` 三条只读观察并正确总结 fixture 日志；同一配置下真实 systemd 服务的 task 3 以 `ls`/`grep` 两条 Evidence 到达 `SEALED`，attempt=1；API Bearer 认证由 `httptest` 和一次真实二进制冒烟覆盖（health=200、无 token=401、带 token=200）；per-action cgroup v2 在真实 systemd delegated cgroup 上通过 shell 集成测试（`memory.max=67108864`、`pids.max=32`、`cpu.max=50000 100000`、超时清理、无残留子 cgroup）；bubblewrap 沙箱在真实 systemd 服务中完成启动探测，worker 探针在沙箱内执行并到达 `SEALED`，root-only/loopback-only 集成测试通过。
 - **未验证**：uid 切换的成功路径（需要 root 和真实目标账号）、cgroup 的 `cpuset`/`io` 控制器。这些不能因为测试套件全绿而被视为已实现。
 - **Linux CI**：GitHub Actions `Linux CI` 已在 `feat/phase1-go-skeleton` 上成功执行 build/vet/test/race；最低 Go 1.26.0 由独立 job 验证（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)）。
 - 前端 `npm run build`（含 `vue-tsc`）已在本机重新验证通过；dev 代理与真实后端的联调沿用此前的开发机结果，本次未重跑。
@@ -127,7 +127,7 @@ POST /api/tasks
 
 ### 已知限制（不是待办清单的装饰）
 
-- **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；`GRADOPS_AGENT_LOOP=true` 才启用多轮 observe/finish，否则仍走两阶段。DeepSeek `deepseek-flash` 已做一次真实联调，其他 provider/model 尚未验证；模型输出仍只被当作不可信输入。
+- **默认计划器是替身**：`GRADOPS_PLANNER` 默认为 `stub`，只做固定只读调查并直接封存任务，不会产生提案。设置为 `model` 后才调用 OpenAI 兼容 provider；`GRADOPS_AGENT_LOOP=true` 才启用多轮 observe/finish，否则仍走两阶段。DeepSeek `deepseek-flash` 已做真实联调（直接测试 + systemd 服务任务），其他 provider/model 尚未验证；模型输出仍只被当作不可信输入。
 - **bubblewrap 沙箱**：代码已实现，部署示例启用 `bubblewrap`；真实 systemd 服务上启动探测通过，任务探针在沙箱内完成并封存。默认 `.env.example` 仍为 `none`，需要显式启用。
 - **Agent 重试**：Worker 每次尝试是独立 attempt；Evidence 按 Task + Attempt 关联，重试不自动恢复上一次的模型上下文，旧 attempt 只保留审计追溯。
 - **隔离粒度**：`Session` 每次 `Run` 新建 cgroup/namespace；`Console` 的 cgroup/namespace 从 `NewConsole` 存活到 `Close`，一次调查的多条探针共享它，但不会跨 Action 复用。可写路径是全局 `GRADOPS_ALLOWED_ROOTS`，网络只有隔离/共享两种模式，没有 IP/端口/DNS allowlist；symlink/TOCTOU 未防护。
@@ -137,7 +137,7 @@ POST /api/tasks
 - **资源限制依赖 util-linux**：`prlimit` 缺失时服务会拒绝启动；限制值默认适合只读探针和小文件，不保证兼容所有运维命令。
 - **时限**：`GRADOPS_INVESTIGATION_TIMEOUT` 限制调查阶段（探针 + 模型调用），默认 5 分钟；`GRADOPS_EXECUTION_TIMEOUT` 限制单个已批准动作/补偿的紧急执行上限，默认 5 分钟。审批等待和人工复核没有任务级时限。
 - **API 认证**：设置 `GRADOPS_API_TOKEN` 后所有 `/api` 路由要求 Bearer token；未设置时只允许 `127.0.0.1` / `localhost` / `::1` 监听，同机进程仍可无认证调用。当前没有用户、角色或按任务的细粒度授权。
-- **DeepSeek 联调**：`GRADOPS_LLM_PROVIDER=deepseek` 使用 `https://api.deepseek.com` 和 `deepseek-flash`，API Key 只从环境变量读取；2026-11-11 的真实联调已通过，测试默认仍 skip，需显式设置 `GRADOPS_TEST_REAL_LLM=1`。
+- **DeepSeek 联调**：`GRADOPS_LLM_PROVIDER=deepseek` 使用 `https://api.deepseek.com` 和 `deepseek-flash`，API Key 只从环境变量读取；2026-11-11 的直接测试和 systemd 服务任务均已通过，测试默认仍 skip，需显式设置 `GRADOPS_TEST_REAL_LLM=1`。
 - **模型数据边界**：`GRADOPS_PLANNER=model` 会把任务文本和截断后的探针观测发送给配置的 provider；启用 `GRADOPS_AGENT_LOOP=true` 时，每一轮都会把最近的 Evidence 再次发送。尚未实现提示内容的秘密扫描。API Key 不进入 shell 环境、日志或数据库，但 provider 本身必须被信任到相应程度。默认 `stub` 不发送任何外部数据。
 - **审计链**只防御朴素篡改，DB 拥有者仍可重写整条链；信任边界见[威胁模型](docs/threat-model.md)。
 
