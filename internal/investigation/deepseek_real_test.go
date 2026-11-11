@@ -33,11 +33,17 @@ func TestDeepSeekAgentLoopRealProvider(t *testing.T) {
 	}
 	baseURL := strings.TrimSpace(os.Getenv("DEEPSEEK_BASE_URL"))
 	if baseURL == "" {
-		baseURL = "https://api.deepseek.com/v1"
+		baseURL = strings.TrimSpace(os.Getenv("GRADOPS_LLM_BASE_URL"))
+	}
+	if baseURL == "" {
+		baseURL = "https://api.deepseek.com"
 	}
 	model := strings.TrimSpace(os.Getenv("DEEPSEEK_MODEL"))
 	if model == "" {
-		model = "deepseek-chat"
+		model = strings.TrimSpace(os.Getenv("GRADOPS_LLM_MODEL"))
+	}
+	if model == "" {
+		model = "deepseek-flash"
 	}
 
 	client, err := llm.NewOpenAI(llm.Config{

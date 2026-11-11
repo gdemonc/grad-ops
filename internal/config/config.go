@@ -465,10 +465,10 @@ func Load() (Config, error) {
 	case "openai":
 	case "deepseek":
 		if cfg.LLMBaseURL == "" {
-			cfg.LLMBaseURL = "https://api.deepseek.com/v1"
+			cfg.LLMBaseURL = "https://api.deepseek.com"
 		}
 		if cfg.LLMModel == "" {
-			cfg.LLMModel = "deepseek-chat"
+			cfg.LLMModel = "deepseek-flash"
 		}
 	default:
 		return Config{}, fmt.Errorf("%s must be openai or deepseek (got %q)", envLLMProvider, cfg.LLMProvider)

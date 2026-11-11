@@ -367,7 +367,7 @@ func TestDeepSeekPresetFillsTheCompatibleEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.LLMProvider != "deepseek" || cfg.LLMBaseURL != "https://api.deepseek.com/v1" || cfg.LLMModel != "deepseek-chat" {
+	if cfg.LLMProvider != "deepseek" || cfg.LLMBaseURL != "https://api.deepseek.com" || cfg.LLMModel != "deepseek-flash" {
 		t.Fatalf("unexpected deepseek preset: provider=%q base=%q model=%q", cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMModel)
 	}
 }
