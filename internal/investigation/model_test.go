@@ -409,8 +409,12 @@ func TestModelPlannerDecideFinalizationOnlyAllowsFinish(t *testing.T) {
 		t.Fatalf("finalization prompt is missing its restriction: %s", prompts[0])
 	}
 
-	if _, err := planner.Decide(context.Background(), request); !errors.Is(err, investigation.ErrInvalidPlan) {
-		t.Fatalf("expected observe in finalization to be rejected, got %v", err)
+	decision, err = planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("adapter must let the Service classify finalization observe: %v", err)
+	}
+	if decision.Kind != investigation.AgentObserve {
+		t.Fatalf("expected the observe decision to be returned for Service classification, got %+v", decision)
 	}
 }
 
@@ -435,5 +439,48 @@ func TestModelPlannerDecideExplainsOmittedObservations(t *testing.T) {
 	if !strings.Contains(prompt, "The first 2 observations were omitted") ||
 		!strings.Contains(prompt, "Visible observation indexes retain their original numbering") {
 		t.Fatalf("omitted-context prompt is wrong: %s", prompt)
+	}
+}
+
+func TestModelPlannerDecideOnlyAllowsPromptVisibleCitations(t *testing.T) {
+	replies := []string{
+		`{"kind":"finish","summary":"cites old","citations":[1]}`,
+		`{"kind":"finish","summary":"cites visible","citations":[2]}`,
+	}
+	var prompts []string
+	planner, err := investigation.NewModelPlanner(investigation.ModelConfig{
+		Completer: llm.CompleterFunc(func(_ context.Context, request llm.Request) (llm.Response, error) {
+			prompts = append(prompts, request.User)
+			return llm.Response{Content: replies[len(prompts)-1]}, nil
+		}),
+		MaxProbes:           3,
+		MaxProbeScriptBytes: 1024,
+		MaxObservationBytes: 32,
+		MaxRequestBytes:     1024,
+		MaxPromptBytes:      160,
+		MaxTokens:           512,
+	})
+	if err != nil {
+		t.Fatalf("new model planner: %v", err)
+	}
+	request := investigation.AgentRequest{
+		Request:          "check",
+		Round:            2,
+		MaxRounds:        4,
+		RemainingCalls:   2,
+		MaxCallsPerRound: 2,
+		Observations: []investigation.Observation{
+			{Index: 1, Command: "old", Content: strings.Repeat("a", 100)},
+			{Index: 2, Command: "new", Content: strings.Repeat("b", 100)},
+		},
+	}
+	if _, err := planner.Decide(context.Background(), request); !errors.Is(err, investigation.ErrInvalidPlan) {
+		t.Fatalf("a citation outside the trimmed prompt must be rejected, got %v", err)
+	}
+	if !strings.Contains(prompts[0], "[2] command: new") || strings.Contains(prompts[0], "[1] command: old") {
+		t.Fatalf("prompt did not preserve only the newest observation: %s", prompts[0])
+	}
+	if _, err := planner.Decide(context.Background(), request); err != nil {
+		t.Fatalf("the visible citation should be accepted: %v", err)
 	}
 }

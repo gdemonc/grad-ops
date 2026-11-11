@@ -131,6 +131,7 @@ TASK_REQUEST_JSON:
 // Conclude asks the model to interpret the observations, cite probes and
 // optionally propose an action.
 func (p *ModelPlanner) Conclude(ctx context.Context, request string, observations []Observation) (Conclusion, error) {
+	observationText, visible := p.renderObservations(observations)
 	prompt := fmt.Sprintf(`Return one JSON object and nothing else.
 The object has these fields:
 - "summary": a concise conclusion grounded in the observations.
@@ -157,7 +158,7 @@ TASK_REQUEST_JSON:
 
 OBSERVATIONS:
 %s`, runAsInstruction(p.cfg.DefaultRunAs), jsonString(p.cfg.MaxRequestBytes, request),
-		p.renderObservations(observations))
+		observationText)
 
 	response, err := p.client.Complete(ctx, llm.Request{
 		System:    plannerSystemPrompt,
@@ -180,9 +181,13 @@ OBSERVATIONS:
 	if len(conclusion.Summary) > 8<<10 {
 		return Conclusion{}, fmt.Errorf("%w: summary exceeds 8 KiB", ErrInvalidPlan)
 	}
+	visibleSet := make(map[int]bool, len(visible))
+	for _, index := range visible {
+		visibleSet[index] = true
+	}
 	for _, citation := range conclusion.Citations {
-		if citation < 1 || citation > len(observations) {
-			return Conclusion{}, fmt.Errorf("%w: citation %d does not identify an observation", ErrInvalidPlan, citation)
+		if !visibleSet[citation] {
+			return Conclusion{}, fmt.Errorf("%w: citation %d does not identify a displayed observation", ErrInvalidPlan, citation)
 		}
 	}
 	if conclusion.Summary == "" {
@@ -328,21 +333,58 @@ func (p *ModelPlanner) check(raw *modelCheck, label string) (contract.Postcondit
 	}, nil
 }
 
-func (p *ModelPlanner) renderObservations(observations []Observation) string {
-	var builder strings.Builder
-	for _, observation := range observations {
+// renderObservations returns the observation block that actually fits in the
+// prompt and the indexes that block contains. It selects newest-first so a
+// prompt limit drops older context, not the result that just arrived.
+func (p *ModelPlanner) renderObservations(observations []Observation) (string, []int) {
+	if len(observations) == 0 {
+		return "", nil
+	}
+
+	type rendered struct {
+		text  string
+		index int
+	}
+	selected := make([]rendered, 0, len(observations))
+	used := 0
+	for i := len(observations) - 1; i >= 0; i-- {
+		observation := observations[i]
+		limit := p.cfg.MaxObservationBytes
+		if limit > p.cfg.MaxPromptBytes {
+			limit = p.cfg.MaxPromptBytes
+		}
 		content := observation.Content
-		if len(content) > p.cfg.MaxObservationBytes {
-			content = content[:p.cfg.MaxObservationBytes] + "\n[observation truncated]"
+		if len(content) > limit {
+			content = content[:limit] + "\n[observation truncated]"
 		}
 		entry := fmt.Sprintf("[%d] command: %s\ntruncated: %t\n%s\n", observation.Index, observation.Command, observation.Truncated, content)
-		if builder.Len()+len(entry) > p.cfg.MaxPromptBytes {
-			builder.WriteString(fmt.Sprintf("[observations after %d omitted for size]\n", observation.Index-1))
+		if used+len(entry) > p.cfg.MaxPromptBytes {
+			if len(selected) == 0 {
+				// Keep the newest observation visible even if its command
+				// prefix alone is larger than the configured prompt budget.
+				selected = append(selected, rendered{text: entry, index: observation.Index})
+				used += len(entry)
+			}
 			break
 		}
-		builder.WriteString(entry)
+		selected = append(selected, rendered{text: entry, index: observation.Index})
+		used += len(entry)
 	}
-	return builder.String()
+
+	var builder strings.Builder
+	omitted := len(observations) - len(selected)
+	if omitted > 0 {
+		note := fmt.Sprintf("[%d older observations omitted for prompt size]\n", omitted)
+		if used+len(note) <= p.cfg.MaxPromptBytes {
+			builder.WriteString(note)
+		}
+	}
+	indexes := make([]int, 0, len(selected))
+	for i := len(selected) - 1; i >= 0; i-- {
+		builder.WriteString(selected[i].text)
+		indexes = append(indexes, selected[i].index)
+	}
+	return builder.String(), indexes
 }
 
 func runAsInstruction(runAs string) string {
@@ -412,6 +454,7 @@ func (p *ModelPlanner) Decide(ctx context.Context, request AgentRequest) (AgentD
 		omitted = fmt.Sprintf("The first %d observations were omitted due to context limits.", request.Omitted)
 	}
 
+	observationText, visible := p.renderObservations(request.Observations)
 	prompt := fmt.Sprintf(`Return one JSON object and nothing else. You are in a multi-round,
 read-only Linux investigation. Choose exactly one of these shapes:
 
@@ -436,7 +479,7 @@ TASK_REQUEST_JSON:
 
 OBSERVATIONS:
 %s`, mode, omitted, jsonString(p.cfg.MaxRequestBytes, request.Request),
-		p.renderObservations(request.Observations))
+		observationText)
 
 	response, err := p.client.Complete(ctx, llm.Request{
 		System:    plannerSystemPrompt,
@@ -460,7 +503,10 @@ OBSERVATIONS:
 	switch AgentDecisionKind(strings.TrimSpace(decoded.Kind)) {
 	case AgentObserve:
 		if request.FinalizeOnly {
-			return AgentDecision{}, fmt.Errorf("%w: finalization round only allows finish", ErrInvalidPlan)
+			// The Service owns the finalization classification. Returning the
+			// decision keeps a single ErrAgentBudget path instead of turning
+			// the same protocol violation into ErrInvalidPlan in the adapter.
+			return AgentDecision{Kind: AgentObserve, Commands: decoded.Commands}, nil
 		}
 		if len(decoded.Commands) == 0 {
 			return AgentDecision{}, fmt.Errorf("%w: observe returned no commands", ErrInvalidPlan)
@@ -495,13 +541,13 @@ OBSERVATIONS:
 		if len(decoded.Citations) == 0 {
 			return AgentDecision{}, fmt.Errorf("%w: finish must cite at least one observation", ErrInvalidPlan)
 		}
-		visible := make(map[int]bool, len(request.Observations))
-		for _, observation := range request.Observations {
-			visible[observation.Index] = true
+		visibleSet := make(map[int]bool, len(visible))
+		for _, index := range visible {
+			visibleSet[index] = true
 		}
 		for _, citation := range decoded.Citations {
-			if !visible[citation] {
-				return AgentDecision{}, fmt.Errorf("%w: citation %d does not identify a visible observation", ErrInvalidPlan, citation)
+			if !visibleSet[citation] {
+				return AgentDecision{}, fmt.Errorf("%w: citation %d does not identify a displayed observation", ErrInvalidPlan, citation)
 			}
 		}
 		return AgentDecision{Kind: AgentFinish, Summary: summary, Citations: decoded.Citations}, nil
