@@ -39,6 +39,8 @@ type RuntimeInfo struct {
 	OpenFileLimit     int64 `json:"open_file_limit"`
 	// Planner names the investigation planner: stub or model.
 	Planner string `json:"planner"`
+	// AgentLoop reports whether the multi-round observe/finish loop is enabled.
+	AgentLoop bool `json:"agent_loop"`
 	// RuntimeMode is direct or cgroup-v2.
 	RuntimeMode string `json:"runtime_mode"`
 	// SandboxMode is none or bubblewrap.
@@ -353,7 +355,7 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 		{Key: "policy", Name: "确定性策略", Status: "ok",
 			Detail: fmt.Sprintf("策略版本 %s，判定不读取模型自报风险", info.PolicyVersion)},
 		{Key: "planner", Name: "调查计划器", Status: "ok",
-			Detail: plannerDetail(info.Planner)},
+			Detail: plannerDetail(info)},
 		{Key: "api_auth", Name: "API 认证", Status: apiAuthStatus(info),
 			Detail: apiAuthDetail(info)},
 		{Key: "contract", Name: "动作契约", Status: "ok",
@@ -429,9 +431,12 @@ func apiAuthDetail(info RuntimeInfo) string {
 	return "未设置 GRADOPS_API_TOKEN：仅允许回环地址监听，API 对同机进程无认证"
 }
 
-func plannerDetail(planner string) string {
-	if planner == "model" {
-		return "模型只提出探针和动作；探针先过只读校验，动作再过策略、契约和必要的人工审批"
+func plannerDetail(info RuntimeInfo) string {
+	if info.Planner == "model" && info.AgentLoop {
+		return "多轮只读 Agent Loop：模型每轮看到已保存的 Evidence 后决定 observe 或 finish；命令先过只读校验，每轮有轮数/调用/上下文预算"
+	}
+	if info.Planner == "model" {
+		return "两阶段模型：先选探针，再看证据给结论/动作；探针先过只读校验，动作再过策略、契约和必要的人工审批"
 	}
 	return "确定性替身：固定只读探针，不解释任务请求，也不会提出动作"
 }

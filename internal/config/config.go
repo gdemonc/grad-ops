@@ -56,6 +56,11 @@ const (
 	envLimitFSize      = "GRADOPS_RLIMIT_FSIZE_BYTES"
 	envLimitNoFile     = "GRADOPS_RLIMIT_NOFILE"
 	envPlanner         = "GRADOPS_PLANNER"
+	envAgentLoop       = "GRADOPS_AGENT_LOOP"
+	envAgentRounds     = "GRADOPS_AGENT_MAX_ROUNDS"
+	envAgentMaxCalls   = "GRADOPS_AGENT_MAX_CALLS"
+	envAgentCalls      = "GRADOPS_AGENT_MAX_CALLS_PER_ROUND"
+	envAgentContext    = "GRADOPS_AGENT_CONTEXT_BYTES"
 	envLLMBaseURL      = "GRADOPS_LLM_BASE_URL"
 	envLLMAPIKey       = "GRADOPS_LLM_API_KEY"
 	envLLMModel        = "GRADOPS_LLM_MODEL"
@@ -87,6 +92,10 @@ const (
 	maxByteLimit         = 1 << 40
 	maxCountLimit        = 1_000_000
 	defaultPlanner       = "stub"
+	defaultAgentRounds   = 20
+	defaultAgentMaxCalls = 40
+	defaultAgentCalls    = 5
+	defaultAgentContext  = 32 << 10
 	defaultLLMTimeout    = 30 * time.Second
 	defaultLLMResponse   = 1 << 20
 	defaultLLMMaxProbes  = 6
@@ -177,6 +186,14 @@ type Config struct {
 	// Planner selects "stub" (deterministic probes) or "model" (an
 	// OpenAI-compatible provider).
 	Planner string
+	// AgentLoop selects the multi-round observe/finish investigation loop.
+	AgentLoop bool
+	// AgentRounds, AgentMaxCalls and AgentCallsPerRound bound the loop.
+	AgentRounds        int
+	AgentMaxCalls      int
+	AgentCallsPerRound int
+	// AgentContextBytes bounds the observation context sent to the model.
+	AgentContextBytes int
 	// LLMBaseURL, LLMAPIKey and LLMModel configure the provider. The key is
 	// never logged or written to the database.
 	LLMBaseURL string
@@ -230,6 +247,10 @@ func Load() (Config, error) {
 			MaxOpenFiles:      defaultLimitNoFile,
 		},
 		Planner:                getenv(envPlanner, defaultPlanner),
+		AgentRounds:            defaultAgentRounds,
+		AgentMaxCalls:          defaultAgentMaxCalls,
+		AgentCallsPerRound:     defaultAgentCalls,
+		AgentContextBytes:      defaultAgentContext,
 		LLMBaseURL:             getenv(envLLMBaseURL, ""),
 		LLMAPIKey:              strings.TrimSpace(os.Getenv(envLLMAPIKey)),
 		LLMModel:               getenv(envLLMModel, ""),
@@ -434,6 +455,49 @@ func Load() (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("%s must be stub or model (got %q)", envPlanner, cfg.Planner)
 	}
+	if raw := strings.TrimSpace(os.Getenv(envAgentLoop)); raw != "" {
+		value, err := parseBool(envAgentLoop, raw)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.AgentLoop = value
+	}
+	if raw := strings.TrimSpace(os.Getenv(envAgentRounds)); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 2 || value > 20 {
+			return Config{}, fmt.Errorf("%s must be an integer between 2 and 20", envAgentRounds)
+		}
+		cfg.AgentRounds = value
+	}
+	if raw := strings.TrimSpace(os.Getenv(envAgentMaxCalls)); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			return Config{}, fmt.Errorf("%s must be an integer between 1 and 200", envAgentMaxCalls)
+		}
+		cfg.AgentMaxCalls = value
+	}
+	if raw := strings.TrimSpace(os.Getenv(envAgentCalls)); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 8 {
+			return Config{}, fmt.Errorf("%s must be an integer between 1 and 8", envAgentCalls)
+		}
+		cfg.AgentCallsPerRound = value
+	}
+	contextBytes, err := parseBound(envAgentContext, int64(cfg.AgentContextBytes), 1<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	if contextBytes < 1024 {
+		return Config{}, fmt.Errorf("%s must be at least 1024", envAgentContext)
+	}
+	cfg.AgentContextBytes = int(contextBytes)
+	if cfg.AgentLoop && cfg.Planner != "model" {
+		return Config{}, fmt.Errorf("%s=true requires %s=model", envAgentLoop, envPlanner)
+	}
+	if cfg.AgentCallsPerRound > cfg.AgentMaxCalls {
+		return Config{}, fmt.Errorf("%s must not exceed %s", envAgentCalls, envAgentMaxCalls)
+	}
+
 	if cfg.Planner == "model" {
 		if cfg.LLMBaseURL == "" {
 			return Config{}, fmt.Errorf("%s is required when %s=model", envLLMBaseURL, envPlanner)

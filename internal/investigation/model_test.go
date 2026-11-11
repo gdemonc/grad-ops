@@ -306,3 +306,181 @@ func TestInvestigationStopsAtTheTotalTimeout(t *testing.T) {
 		t.Fatalf("the investigation did not stop near its budget: %s", elapsed)
 	}
 }
+
+func TestModelPlannerDecideParsesObserveAndFinish(t *testing.T) {
+	replies := []string{
+		`{"kind":"observe","commands":["uname -a","uptime"]}`,
+		`{"kind":"finish","summary":"the process is missing","citations":[1]}`,
+	}
+	var prompts []string
+	planner := testModelPlanner(t, func(_ context.Context, request llm.Request) (llm.Response, error) {
+		prompts = append(prompts, request.User)
+		return llm.Response{Content: replies[len(prompts)-1]}, nil
+	})
+
+	request := investigation.AgentRequest{
+		Request:          "java returns 502",
+		Round:            1,
+		MaxRounds:        4,
+		RemainingCalls:   3,
+		MaxCallsPerRound: 2,
+		Observations: []investigation.Observation{
+			{Index: 1, Command: "uname -a", Content: "Linux"},
+		},
+	}
+	decision, err := planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+	if decision.Kind != investigation.AgentObserve || len(decision.Commands) != 2 {
+		t.Fatalf("unexpected observe decision: %+v", decision)
+	}
+	if !strings.Contains(prompts[0], "TASK_REQUEST_JSON") || !strings.Contains(prompts[0], "[1] command: uname -a") {
+		t.Fatalf("prompt does not contain the bounded context: %s", prompts[0])
+	}
+
+	decision, err = planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if decision.Kind != investigation.AgentFinish || decision.Summary == "" || len(decision.Citations) != 1 {
+		t.Fatalf("unexpected finish decision: %+v", decision)
+	}
+}
+
+func TestModelPlannerDecideRejectsInvalidProtocol(t *testing.T) {
+	cases := map[string]string{
+		"unknown kind":  `{"kind":"act","commands":["uname"]}`,
+		"empty observe": `{"kind":"observe","commands":[]}`,
+		"blank command": `{"kind":"observe","commands":["  "]}`,
+		"too many":      `{"kind":"observe","commands":["a","b","c"]}`,
+		"empty summary": `{"kind":"finish","summary":"","citations":[1]}`,
+		"no citations":  `{"kind":"finish","summary":"done","citations":[]}`,
+		"bad citation":  `{"kind":"finish","summary":"done","citations":[2]}`,
+		"not json":      `I will observe`,
+	}
+	for name, reply := range cases {
+		t.Run(name, func(t *testing.T) {
+			planner := testModelPlanner(t, func(context.Context, llm.Request) (llm.Response, error) {
+				return llm.Response{Content: reply}, nil
+			})
+			_, err := planner.Decide(context.Background(), investigation.AgentRequest{
+				Request:          "check",
+				Round:            1,
+				MaxRounds:        3,
+				RemainingCalls:   2,
+				MaxCallsPerRound: 2,
+				Observations:     []investigation.Observation{{Index: 1, Command: "uname", Content: "Linux"}},
+			})
+			if !errors.Is(err, investigation.ErrInvalidPlan) {
+				t.Fatalf("expected ErrInvalidPlan, got %v", err)
+			}
+		})
+	}
+}
+
+func TestModelPlannerDecideFinalizationOnlyAllowsFinish(t *testing.T) {
+	var prompts []string
+	replies := []string{
+		`{"kind":"finish","summary":"the evidence is sufficient","citations":[1]}`,
+		`{"kind":"observe","commands":["uname -a"]}`,
+	}
+	planner := testModelPlanner(t, func(_ context.Context, request llm.Request) (llm.Response, error) {
+		prompts = append(prompts, request.User)
+		return llm.Response{Content: replies[len(prompts)-1]}, nil
+	})
+	request := investigation.AgentRequest{
+		Request:          "check",
+		Round:            4,
+		MaxRounds:        4,
+		RemainingCalls:   0,
+		MaxCallsPerRound: 2,
+		FinalizeOnly:     true,
+		Observations:     []investigation.Observation{{Index: 1, Command: "uname", Content: "Linux"}},
+	}
+	decision, err := planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if decision.Kind != investigation.AgentFinish {
+		t.Fatalf("expected finish, got %+v", decision)
+	}
+	if !strings.Contains(prompts[0], "Only finish is allowed") {
+		t.Fatalf("finalization prompt is missing its restriction: %s", prompts[0])
+	}
+
+	decision, err = planner.Decide(context.Background(), request)
+	if err != nil {
+		t.Fatalf("adapter must let the Service classify finalization observe: %v", err)
+	}
+	if decision.Kind != investigation.AgentObserve {
+		t.Fatalf("expected the observe decision to be returned for Service classification, got %+v", decision)
+	}
+}
+
+func TestModelPlannerDecideExplainsOmittedObservations(t *testing.T) {
+	var prompt string
+	planner := testModelPlanner(t, func(_ context.Context, request llm.Request) (llm.Response, error) {
+		prompt = request.User
+		return llm.Response{Content: `{"kind":"finish","summary":"grounded","citations":[3]}`}, nil
+	})
+	_, err := planner.Decide(context.Background(), investigation.AgentRequest{
+		Request:          "check",
+		Round:            2,
+		MaxRounds:        4,
+		RemainingCalls:   2,
+		MaxCallsPerRound: 2,
+		Observations:     []investigation.Observation{{Index: 3, Command: "uname", Content: "Linux"}},
+		Omitted:          2,
+	})
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if !strings.Contains(prompt, "The first 2 observations were omitted") ||
+		!strings.Contains(prompt, "Visible observation indexes retain their original numbering") {
+		t.Fatalf("omitted-context prompt is wrong: %s", prompt)
+	}
+}
+
+func TestModelPlannerDecideOnlyAllowsPromptVisibleCitations(t *testing.T) {
+	replies := []string{
+		`{"kind":"finish","summary":"cites old","citations":[1]}`,
+		`{"kind":"finish","summary":"cites visible","citations":[2]}`,
+	}
+	var prompts []string
+	planner, err := investigation.NewModelPlanner(investigation.ModelConfig{
+		Completer: llm.CompleterFunc(func(_ context.Context, request llm.Request) (llm.Response, error) {
+			prompts = append(prompts, request.User)
+			return llm.Response{Content: replies[len(prompts)-1]}, nil
+		}),
+		MaxProbes:           3,
+		MaxProbeScriptBytes: 1024,
+		MaxObservationBytes: 32,
+		MaxRequestBytes:     1024,
+		MaxPromptBytes:      160,
+		MaxTokens:           512,
+	})
+	if err != nil {
+		t.Fatalf("new model planner: %v", err)
+	}
+	request := investigation.AgentRequest{
+		Request:          "check",
+		Round:            2,
+		MaxRounds:        4,
+		RemainingCalls:   2,
+		MaxCallsPerRound: 2,
+		Observations: []investigation.Observation{
+			{Index: 1, Command: "old", Content: strings.Repeat("a", 100)},
+			{Index: 2, Command: "new", Content: strings.Repeat("b", 100)},
+		},
+	}
+	if _, err := planner.Decide(context.Background(), request); !errors.Is(err, investigation.ErrInvalidPlan) {
+		t.Fatalf("a citation outside the trimmed prompt must be rejected, got %v", err)
+	}
+	if !strings.Contains(prompts[0], "[2] command: new") || strings.Contains(prompts[0], "[1] command: old") {
+		t.Fatalf("prompt did not preserve only the newest observation: %s", prompts[0])
+	}
+	if _, err := planner.Decide(context.Background(), request); err != nil {
+		t.Fatalf("the visible citation should be accepted: %v", err)
+	}
+}

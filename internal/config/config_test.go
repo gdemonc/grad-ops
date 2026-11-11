@@ -312,3 +312,48 @@ func TestSandboxRejectsUnknownModeAndRelativeBinary(t *testing.T) {
 		t.Fatal("expected a relative bubblewrap path to be rejected")
 	}
 }
+
+func TestAgentLoopDefaultsOffAndParsesBounds(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.AgentLoop || cfg.AgentRounds != 20 || cfg.AgentMaxCalls != 40 || cfg.AgentCallsPerRound != 5 || cfg.AgentContextBytes != 32<<10 {
+		t.Fatalf("unexpected agent defaults: loop=%t rounds=%d max_calls=%d calls=%d context=%d",
+			cfg.AgentLoop, cfg.AgentRounds, cfg.AgentMaxCalls, cfg.AgentCallsPerRound, cfg.AgentContextBytes)
+	}
+
+	cfg, err = loadWith(t, map[string]string{
+		"GRADOPS_PLANNER":                   "model",
+		"GRADOPS_LLM_BASE_URL":              "http://127.0.0.1:18080/v1",
+		"GRADOPS_LLM_MODEL":                 "test-model",
+		"GRADOPS_AGENT_LOOP":                "true",
+		"GRADOPS_AGENT_MAX_ROUNDS":          "4",
+		"GRADOPS_AGENT_MAX_CALLS":           "8",
+		"GRADOPS_AGENT_MAX_CALLS_PER_ROUND": "2",
+		"GRADOPS_AGENT_CONTEXT_BYTES":       "8192",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.AgentLoop || cfg.AgentRounds != 4 || cfg.AgentMaxCalls != 8 || cfg.AgentCallsPerRound != 2 || cfg.AgentContextBytes != 8192 {
+		t.Fatalf("unexpected agent config: loop=%t rounds=%d max_calls=%d calls=%d context=%d",
+			cfg.AgentLoop, cfg.AgentRounds, cfg.AgentMaxCalls, cfg.AgentCallsPerRound, cfg.AgentContextBytes)
+	}
+}
+
+func TestAgentLoopRequiresModelPlannerAndValidBounds(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{"GRADOPS_AGENT_LOOP": "true"}); err == nil {
+		t.Fatal("expected agent loop with the stub planner to be rejected")
+	}
+	for key, value := range map[string]string{
+		"GRADOPS_AGENT_MAX_ROUNDS":          "1",
+		"GRADOPS_AGENT_MAX_CALLS":           "0",
+		"GRADOPS_AGENT_MAX_CALLS_PER_ROUND": "9",
+		"GRADOPS_AGENT_CONTEXT_BYTES":       "512",
+	} {
+		if _, err := loadWith(t, map[string]string{key: value}); err == nil {
+			t.Fatalf("expected %s=%s to be rejected", key, value)
+		}
+	}
+}

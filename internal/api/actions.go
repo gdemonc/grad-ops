@@ -78,6 +78,7 @@ type verificationDTO struct {
 
 type evidenceDTO struct {
 	ID          string `json:"id"`
+	Attempt     int    `json:"attempt"`
 	Tool        string `json:"tool"`
 	Command     string `json:"command"`
 	ObservedAt  string `json:"observed_at"`
@@ -350,6 +351,7 @@ func (h *handlers) listEvidence(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		out = append(out, evidenceDTO{
 			ID:          record.ID,
+			Attempt:     record.Attempt,
 			Tool:        record.Tool,
 			Command:     record.Command,
 			ObservedAt:  domain.FormatTime(record.ObservedAt),
