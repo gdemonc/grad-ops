@@ -413,3 +413,26 @@ func TestAgentLoopStopsOnContextCancellation(t *testing.T) {
 		t.Fatalf("cancelled investigation must stay investigating, got %s", status)
 	}
 }
+
+func TestModelPlannerFinalizationObserveIsABudgetError(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+	planner, err := investigation.NewModelPlanner(investigation.ModelConfig{
+		Completer: llm.CompleterFunc(func(context.Context, llm.Request) (llm.Response, error) {
+			return llm.Response{Content: `{"kind":"observe","commands":["printf 'still observing'"]}`}, nil
+		}),
+		MaxProbes:           2,
+		MaxProbeScriptBytes: 256,
+		MaxObservationBytes: 256,
+		MaxRequestBytes:     256,
+		MaxPromptBytes:      1024,
+		MaxTokens:           128,
+	})
+	if err != nil {
+		t.Fatalf("new model planner: %v", err)
+	}
+	service := newAgentService(t, db, planner, 2, 1, 1)
+	if _, err := service.Investigate(context.Background(), taskID); !errors.Is(err, investigation.ErrAgentBudget) {
+		t.Fatalf("expected ErrAgentBudget from finalization observe, got %v", err)
+	}
+}
