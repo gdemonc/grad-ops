@@ -200,6 +200,7 @@ func run() error {
 			Limits:             cfg.Limits,
 			Cgroup:             cfg.Cgroup,
 			Sandbox:            sandbox,
+			FileRoots:          cfg.FileRoots,
 		})
 	if err != nil {
 		return fmt.Errorf("build investigation: %w", err)

@@ -246,3 +246,40 @@ func TestCanonicalVector(t *testing.T) {
 		t.Fatalf("paths were not cleaned and sorted: %v", paths)
 	}
 }
+
+func TestFileTargetIsPartOfTheCanonicalDigest(t *testing.T) {
+	now := time.Now().UTC()
+	base := contract.Contract{
+		Tool: "fileops", Kind: "modify_file", Script: "fileops append",
+		WorkDir: "/", Env: map[string]string{}, Paths: []string{"/var/log/app.log"},
+		RunAs: "gradops-agent", Reversible: true,
+		Runtime:       contract.Runtime{TimeoutMS: 5000, MaxOutputBytes: 4096, MaxCalls: 1},
+		Postcondition: contract.Postcondition{Command: "printf ok"},
+		Risk:          "R1", PolicyVersion: "test", ApprovalLevel: "human",
+		Nonce:     "0123456789abcdef0123456789abcdef",
+		CreatedAt: domain.FormatTime(now), ExpiresAt: domain.FormatTime(now.Add(time.Minute)),
+		FileTarget: &contract.FileTarget{
+			Root: "/var/log", RootDevice: 1, RootInode: 2,
+			Relative: "app.log", Operation: "append", Data: "line\n",
+			Device: 3, Inode: 4,
+		},
+	}
+	if err := base.Canonicalize(); err != nil {
+		t.Fatalf("canonicalize: %v", err)
+	}
+	first, err := base.Digest()
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	changed := base
+	changedTarget := *base.FileTarget
+	changedTarget.Inode = 5
+	changed.FileTarget = &changedTarget
+	second, err := changed.Digest()
+	if err != nil {
+		t.Fatalf("changed digest: %v", err)
+	}
+	if first == second {
+		t.Fatal("file identity must be part of the contract digest")
+	}
+}

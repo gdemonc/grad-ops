@@ -414,3 +414,31 @@ func TestDeepSeekAcceptItsDocumentedAPIKeyAlias(t *testing.T) {
 		t.Fatal("DEEPSEEK_API_KEY must not be used by the openai provider")
 	}
 }
+
+func TestFileRootsAreSeparateAndMustBeTrusted(t *testing.T) {
+	root := t.TempDir()
+	cfg, err := loadWith(t, map[string]string{
+		"GRADOPS_ALLOWED_ROOTS": root,
+		"GRADOPS_FILE_ROOTS":    root,
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(cfg.FileRoots) != 1 || cfg.FileRoots[0] != root {
+		t.Fatalf("unexpected file roots: %v", cfg.FileRoots)
+	}
+
+	outside := t.TempDir()
+	if _, err := loadWith(t, map[string]string{
+		"GRADOPS_ALLOWED_ROOTS": root,
+		"GRADOPS_FILE_ROOTS":    outside,
+	}); err == nil {
+		t.Fatal("expected a file root outside allowed roots to be rejected")
+	}
+	if _, err := loadWith(t, map[string]string{
+		"GRADOPS_ALLOWED_ROOTS": "/",
+		"GRADOPS_FILE_ROOTS":    "/",
+	}); err == nil {
+		t.Fatal("expected the filesystem root as a file root to be rejected")
+	}
+}

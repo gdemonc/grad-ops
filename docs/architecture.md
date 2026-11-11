@@ -114,7 +114,7 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 
 - `Session`：每次 `Run` 创建一个新的子 cgroup；启用 sandbox 时也创建一个新的 bubblewrap 命名空间。Executor 的动作和验证使用这种 per-call 边界。
 - `Console`：`NewConsole` 只创建一次 Bash、cgroup 和 sandbox，之后同一调查上下文内的多次探针共享它们，直到 `Close`。开启 `GRADOPS_PROBE_CONSOLE=true` 时，一次调查的多条探针共享状态，因此**不是每条探针独立的 namespace**；Console 不会跨独立 Action 复用，Executor 也从不使用 Console。
-- 可写路径来自全局 `GRADOPS_ALLOWED_ROOTS`，不是按 Action 动态授权；网络只有“默认隔离”和 `GRADOPS_SANDBOX_NETWORK=true` 共享宿主两种模式，没有 IP/端口/DNS allowlist；路径绑定没有解决 symlink/TOCTOU。
+- 可写路径来自全局 `GRADOPS_ALLOWED_ROOTS`，不是按 Action 动态授权；网络只有“默认隔离”和 `GRADOPS_SANDBOX_NETWORK=true` 共享宿主两种模式，没有 IP/端口/DNS allowlist。`internal/fileops` 已提供 symlink/TOCTOU-safe 的 fd 基础，但尚未接入任意 Shell 动作。
 
 ### 4.5 Agent Loop 的职责边界
 
@@ -141,6 +141,12 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 6. Landlock、Bubblewrap、seccomp、AppArmor 可作为后续增强，按实际需要和兼容性测试引入，不要求首期全部叠加。
 
 调查阶段可以访问为只读取证明确开放的主机信息；变更操作必须通过 Policy/Approval 和受控执行入口。若某项操作需要的隔离能力在目标系统不可用，应拒绝该操作或降级为只读，不得静默退回到不受限 Shell。
+
+### 4.6 文件目标解析
+
+`internal/fileops` 提供基于 `openat2` 的 fd 相对文件目标解析：根目录只打开一次，目标相对根 fd 使用 `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV` 打开，返回的 `*os.File` 和 inode 身份用于后续读写。这样不会在审批后把字符串路径重新解析一次；路径被 rename 或替换后，已打开的 fd 仍指向原对象。
+
+当前它已接入 Executor 的最小受控 `fileops append`：审批时绑定根目录、目标的 dev/inode，执行时先用 `O_PATH` 检查类型和身份，再通过已打开 fd 的 `/proc/self/fd` 入口获得可写 fd，追加并 fsync；根目录/目标被替换、symlink swap、非普通文件或 `run_as` 与当前身份不一致都会拒绝执行。任意 Bash 动作仍未使用这个 API，现有 Shell 副作用仍主要依赖 Policy、审批、Runtime 和声明路径的语义检查；不能把该包的存在当成 Shell 文件操作已经安全。
 
 ### 4.5 Action Contract 与审计
 

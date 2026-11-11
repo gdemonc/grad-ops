@@ -29,6 +29,7 @@ const (
 	envWorkDir         = "GRADOPS_WORK_DIR"
 	envContractWorkDir = "GRADOPS_CONTRACT_WORK_DIR"
 	envAllowedRoots    = "GRADOPS_ALLOWED_ROOTS"
+	envFileRoots       = "GRADOPS_FILE_ROOTS"
 	envPolicyVersion   = "GRADOPS_POLICY_VERSION"
 	envApprovalTTL     = "GRADOPS_APPROVAL_TTL"
 	envWorker          = "GRADOPS_WORKER"
@@ -143,6 +144,9 @@ type Config struct {
 	ContractWorkDir string
 	// AllowedRoots bounds every path an action may declare.
 	AllowedRoots []string
+	// FileRoots are trusted directories for fd-based file operations. They
+	// must be narrower than or equal to AllowedRoots.
+	FileRoots []string
 	// PolicyVersion identifies the rule set that produced a decision.
 	PolicyVersion string
 	// ApprovalTTL is how long an approval token stays valid.
@@ -326,6 +330,33 @@ func Load() (Config, error) {
 	}
 	if len(cfg.AllowedRoots) == 0 {
 		return Config{}, fmt.Errorf("%s must list at least one root", envAllowedRoots)
+	}
+
+	cfg.FileRoots = cfg.FileRoots[:0]
+	for _, root := range strings.Split(getenv(envFileRoots, ""), ":") {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		if !strings.HasPrefix(root, "/") || filepath.Clean(root) == "/" {
+			return Config{}, fmt.Errorf("%s entries must be non-root absolute POSIX paths (got %q)", envFileRoots, root)
+		}
+		root = filepath.Clean(root)
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			return Config{}, fmt.Errorf("%s entry %q must be an existing directory", envFileRoots, root)
+		}
+		allowed := false
+		for _, allowedRoot := range cfg.AllowedRoots {
+			if root == filepath.Clean(allowedRoot) || strings.HasPrefix(root, filepath.Clean(allowedRoot)+string(filepath.Separator)) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return Config{}, fmt.Errorf("%s entry %q is outside %s", envFileRoots, root, envAllowedRoots)
+		}
+		cfg.FileRoots = append(cfg.FileRoots, root)
 	}
 
 	if raw := strings.TrimSpace(os.Getenv(envApprovalTTL)); raw != "" {
