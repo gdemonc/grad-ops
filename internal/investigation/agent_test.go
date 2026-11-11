@@ -389,3 +389,27 @@ func TestAgentLoopObservesRealProcessAndLogState(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 }
+
+func TestAgentLoopStopsOnContextCancellation(t *testing.T) {
+	db := testDB(t)
+	taskID := seedTask(t, db, domain.StatusInvestigating)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	decider := &scriptedAgent{}
+	decider.decide = func(request investigation.AgentRequest) (investigation.AgentDecision, error) {
+		cancel()
+		return investigation.AgentDecision{}, context.Canceled
+	}
+	service := newAgentService(t, db, decider, 3, 1)
+	if _, err := service.Investigate(ctx, taskID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM tasks WHERE id = ?`, taskID).Scan(&status); err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	if status != string(domain.StatusInvestigating) {
+		t.Fatalf("cancelled investigation must stay investigating, got %s", status)
+	}
+}
