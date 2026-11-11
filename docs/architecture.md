@@ -75,7 +75,7 @@ Tool 层统一抽象 Linux 本地工具与未来外部 Adapter。首期只实现
 | `internal/approval` | 一次性审批凭证：只存哈希、绑定契约、原子消费 |
 | `internal/executor` | 唯一副作用入口；执行前重算摘要并复核策略；契约内补偿回滚 |
 | `internal/verify` | 执行后的独立只读观测 |
-| `internal/investigation` | 探针 → 证据 → grounding；支持单阶段计划器和“探针 → 观测 → 结论/动作”的两阶段模型计划器 |
+| `internal/investigation` | 探针 → 证据 → grounding；支持单阶段计划器、两阶段模型计划器和多轮 observe/finish Agent Loop |
 | `internal/llm` | OpenAI 兼容聊天客户端：超时、响应大小上限、回环 HTTP 限制、Bearer 认证；不记录密钥 |
 | `internal/evidence` | 内容寻址的证据存储与引用校验 |
 | `internal/task` | Task History 的创建、查询与时间线 |
@@ -116,7 +116,7 @@ AST 不是授权引擎，也不是安全沙箱。Shell 的动态展开、外部�
 - `Console`：`NewConsole` 只创建一次 Bash、cgroup 和 sandbox，之后同一调查上下文内的多次探针共享它们，直到 `Close`。开启 `GRADOPS_PROBE_CONSOLE=true` 时，一次调查的多条探针共享状态，因此**不是每条探针独立的 namespace**；Console 不会跨独立 Action 复用，Executor 也从不使用 Console。
 - 可写路径来自全局 `GRADOPS_ALLOWED_ROOTS`，不是按 Action 动态授权；网络只有“默认隔离”和 `GRADOPS_SANDBOX_NETWORK=true` 共享宿主两种模式，没有 IP/端口/DNS allowlist；路径绑定没有解决 symlink/TOCTOU。
 
-### Agent Loop 的职责边界
+### 4.5 Agent Loop 的职责边界
 
 `GRADOPS_AGENT_LOOP=true` 时，`investigation.Service` 在同一个任务上循环：
 

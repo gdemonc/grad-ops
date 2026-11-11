@@ -347,7 +347,7 @@ func buildPlanner(cfg config.Config, logger *slog.Logger) (investigation.Planner
 	if err != nil {
 		return nil, fmt.Errorf("build model planner: %w", err)
 	}
-	logger.Info("model planner configured", "model", cfg.LLMModel, "run_as", runAs)
+	logger.Info("model planner configured", "model", cfg.LLMModel, "run_as", runAs, "agent_loop", cfg.AgentLoop)
 	return planner, nil
 }
 
