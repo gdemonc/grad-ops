@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -19,6 +20,7 @@ type RuntimeInfo struct {
 	WorkDir         string   `json:"work_dir"`
 	ContractWorkDir string   `json:"contract_work_dir"`
 	AllowedRoots    []string `json:"allowed_roots"`
+	FileRoots       []string `json:"file_roots"`
 	PolicyVersion   string   `json:"policy_version"`
 	ApprovalTTLMS   int64    `json:"approval_ttl_ms"`
 	WorkerEnabled   bool     `json:"worker_enabled"`
@@ -55,20 +57,21 @@ type RuntimeInfo struct {
 }
 
 type approvalItemDTO struct {
-	ID             int64  `json:"id"`
-	ProposalID     int64  `json:"proposal_id"`
-	TaskID         int64  `json:"task_id"`
-	Approver       string `json:"approver"`
-	Comment        string `json:"comment"`
-	Decision       string `json:"decision"`
-	Status         string `json:"status"`
-	ExpiresAt      string `json:"expires_at"`
-	ConsumedAt     string `json:"consumed_at"`
-	CreatedAt      string `json:"created_at"`
-	Tool           string `json:"tool"`
-	RiskLevel      string `json:"risk_level"`
-	ProposalStatus string `json:"proposal_status"`
-	RequestText    string `json:"request_text"`
+	ID             int64           `json:"id"`
+	ProposalID     int64           `json:"proposal_id"`
+	TaskID         int64           `json:"task_id"`
+	Approver       string          `json:"approver"`
+	Comment        string          `json:"comment"`
+	Decision       string          `json:"decision"`
+	Status         string          `json:"status"`
+	ExpiresAt      string          `json:"expires_at"`
+	ConsumedAt     string          `json:"consumed_at"`
+	CreatedAt      string          `json:"created_at"`
+	Tool           string          `json:"tool"`
+	RiskLevel      string          `json:"risk_level"`
+	ProposalStatus string          `json:"proposal_status"`
+	RequestText    string          `json:"request_text"`
+	Contract       json.RawMessage `json:"contract"`
 }
 
 type executionItemDTO struct {
@@ -126,7 +129,7 @@ func (h *handlers) listApprovals(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.deps.DB.QueryContext(r.Context(),
 		`SELECT a.id, a.proposal_id, p.task_id, COALESCE(a.approver, ''), COALESCE(a.comment, ''),
 		        a.decision, COALESCE(a.expires_at, ''), COALESCE(a.consumed_at, ''), a.created_at,
-		        p.tool, p.risk_level, p.status, t.request_text
+		        p.tool, p.risk_level, p.status, t.request_text, p.contract
 		   FROM approvals a
 		   JOIN proposals p ON p.id = a.proposal_id
 		   JOIN tasks t     ON t.id = p.task_id
@@ -145,12 +148,16 @@ func (h *handlers) listApprovals(w http.ResponseWriter, r *http.Request) {
 			item      approvalItemDTO
 			expiresAt string
 			consumed  string
+			contract  string
 		)
 		if err := rows.Scan(&item.ID, &item.ProposalID, &item.TaskID, &item.Approver, &item.Comment,
 			&item.Decision, &expiresAt, &consumed, &item.CreatedAt,
-			&item.Tool, &item.RiskLevel, &item.ProposalStatus, &item.RequestText); err != nil {
+			&item.Tool, &item.RiskLevel, &item.ProposalStatus, &item.RequestText, &contract); err != nil {
 			h.writeActionError(w, fmt.Errorf("scan approval: %w", err))
 			return
+		}
+		if json.Valid([]byte(contract)) {
+			item.Contract = json.RawMessage(contract)
 		}
 		item.ExpiresAt = expiresAt
 		item.ConsumedAt = consumed
@@ -365,6 +372,8 @@ func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 				(time.Duration(info.ApprovalTTLMS) * time.Millisecond).String())},
 		{Key: "paths", Name: "路径边界", Status: "ok",
 			Detail: "动作声明的路径必须落在允许根目录内：" + strings.Join(info.AllowedRoots, ", ")},
+		{Key: "fileops", Name: "受控文件操作", Status: fileOpsStatus(info),
+			Detail: fileOpsDetail(info)},
 		{Key: "identity", Name: "运行身份", Status: identityStatus(info),
 			Detail: identityDetail(info)},
 		{Key: "sandbox", Name: "文件系统/命名空间沙箱", Status: sandboxStatus(info),
@@ -476,6 +485,20 @@ func safetySummary(info RuntimeInfo, overall string) string {
 	}
 	parts = append(parts, "仍无 seccomp、网络 allowlist 或 privileged broker")
 	return strings.Join(parts, "；")
+}
+
+func fileOpsStatus(info RuntimeInfo) string {
+	if len(info.FileRoots) > 0 {
+		return "ok"
+	}
+	return "warn"
+}
+
+func fileOpsDetail(info RuntimeInfo) string {
+	if len(info.FileRoots) == 0 {
+		return "未配置 GRADOPS_FILE_ROOTS：文件操作已禁用"
+	}
+	return "仅支持对已存在普通文件 append；可信根目录：" + strings.Join(info.FileRoots, ", ")
 }
 
 func sandboxStatus(info RuntimeInfo) string {

@@ -4,6 +4,7 @@ import type { EvidenceItem } from '../types'
 
 defineProps<{
   evidence: EvidenceItem
+  round?: number
 }>()
 </script>
 
@@ -24,6 +25,10 @@ defineProps<{
     <div class="kv">
       <span class="k">内容哈希</span>
       <span class="v hash">{{ shortHash(evidence.content_hash) }}</span>
+    </div>
+    <div v-if="round" class="kv">
+      <span class="k">调查轮次</span>
+      <span class="v mono dim">round {{ round }}</span>
     </div>
     <div v-if="evidence.attempt > 0" class="kv">
       <span class="k">Worker attempt</span>

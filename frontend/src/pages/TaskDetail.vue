@@ -13,6 +13,7 @@ import {
 import EvidenceCard from '../components/EvidenceCard.vue'
 import ProposalCard from '../components/ProposalCard.vue'
 import TimelineItem from '../components/TimelineItem.vue'
+import { observationMeta } from '../observability'
 import { useTasksStore } from '../stores/tasks'
 import {
   approvalStatusMeta,
@@ -36,6 +37,22 @@ const current = computed(() => store.current)
 const pendingProposals = computed(
   () => current.value?.proposals.filter((item) => item.status === 'PENDING_APPROVAL') ?? [],
 )
+const otherProposals = computed(
+  () => current.value?.proposals.filter((item) => item.status !== 'PENDING_APPROVAL') ?? [],
+)
+const roundByEvidence = computed(() => {
+  const result: Record<string, number> = {}
+  for (const event of current.value?.timeline ?? []) {
+    if (event.type !== 'investigation.observed') continue
+    const meta = observationMeta(event.payload)
+    if (!meta.round) continue
+    const payload = event.payload as Record<string, unknown>
+    if (typeof payload.evidence_id === 'string' && payload.evidence_id) {
+      result[payload.evidence_id] = meta.round
+    }
+  }
+  return result
+})
 const liveApprovalProposalIds = computed(
   () =>
     new Set(
@@ -279,7 +296,12 @@ onBeforeUnmount(() => {
               </div>
             </template>
             <div v-if="current.evidence.length" class="stack">
-              <EvidenceCard v-for="item in current.evidence" :key="item.id" :evidence="item" />
+              <EvidenceCard
+                v-for="item in current.evidence"
+                :key="item.id"
+                :evidence="item"
+                :round="roundByEvidence[item.id]"
+              />
             </div>
             <div v-else class="empty-block">
               <a-empty description="尚未采集证据" />
@@ -293,11 +315,11 @@ onBeforeUnmount(() => {
                 <a-tag color="blue" size="small">{{ current.proposals.length }}</a-tag>
               </div>
             </template>
-            <div v-if="current.proposals.length" class="stack">
-              <ProposalCard v-for="item in current.proposals" :key="item.id" :proposal="item" />
+            <div v-if="otherProposals.length" class="stack">
+              <ProposalCard v-for="item in otherProposals" :key="item.id" :proposal="item" />
             </div>
             <div v-else class="empty-block">
-              <a-empty description="尚未生成处置方案" />
+              <a-empty :description="pendingProposals.length ? '待审批提案已在上方展示' : '尚未生成处置方案'" />
             </div>
           </a-card>
 
@@ -359,8 +381,13 @@ onBeforeUnmount(() => {
                       {{ record.outcome }}
                     </a-tag>
                     <span class="mono dim">exit {{ record.exit_code }} · {{ record.duration_ms }}ms</span>
+                    <a-tag v-if="record.output_truncated" color="orange" size="small">输出已截断</a-tag>
                   </a-space>
                   <span class="mono dim">{{ formatTime(record.started_at) }}</span>
+                </div>
+                <div class="kv">
+                  <span class="k">提案</span>
+                  <span class="v mono">#{{ record.proposal_id }}</span>
                 </div>
                 <div class="kv">
                   <span class="k">运行身份</span>

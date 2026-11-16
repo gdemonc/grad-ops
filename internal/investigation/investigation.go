@@ -658,7 +658,7 @@ func (s *Service) propose(ctx context.Context, taskID int64, plan Plan, records 
 			`INSERT INTO proposals
 			    (task_id, tool, arguments, risk_level, policy_version, contract, contract_digest, status, rationale, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			taskID, "bash", string(rawContract), string(evaluation.Risk), evaluation.PolicyVersion,
+			taskID, tool, string(rawContract), string(evaluation.Risk), evaluation.PolicyVersion,
 			string(rawContract), digest, status, rationale, domain.FormatTime(now))
 		if err != nil {
 			return fmt.Errorf("insert proposal: %w", err)
