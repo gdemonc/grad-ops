@@ -5,12 +5,14 @@ import {
   IconExclamationCircleFill,
   IconRefresh,
 } from '@arco-design/web-vue/es/icon'
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { runtimeFileRoots } from '../observability'
 import { useTasksStore } from '../stores/tasks'
 import { guardStatusMeta } from '../types'
 import type { SafetyGuard, SafetyReport, SafetyRuntime } from '../types'
 
 const store = useTasksStore()
+const fileRoots = computed(() => runtimeFileRoots(store.safetyReport?.runtime))
 
 function bannerType(status: SafetyReport['overall_status']): 'success' | 'warning' | 'error' {
   if (status === 'ok') return 'success'
@@ -208,6 +210,28 @@ onMounted(() => {
             <p class="dim">
               动作声明的每个路径都必须落在这些根之内；契约里的运行身份必须是显式声明的非 root
               身份。策略层目前是确定性的模式匹配，不是 AST 分析。
+            </p>
+          </a-card>
+
+          <a-card class="panel">
+            <template #title><div class="panel-title">FileOps 可写根</div></template>
+            <div v-if="fileRoots.length" class="tag-row">
+              <a-tag
+                v-for="root in fileRoots"
+                :key="root"
+                color="arcoblue"
+                class="mono"
+                size="small"
+              >
+                {{ root }}
+              </a-tag>
+            </div>
+            <div v-else class="empty-block">
+              <a-empty description="FileOps 已禁用（GRADOPS_FILE_ROOTS 为空）" />
+            </div>
+            <p class="dim" style="margin-top: 12px">
+              仅支持对已存在普通文件执行 append；目标根目录必须显式配置，不能从 AllowedRoots
+              自动推导。审批绑定目标 inode，执行时重新校验。
             </p>
           </a-card>
         </div>

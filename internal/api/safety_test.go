@@ -46,3 +46,28 @@ func TestSafetySummaryMatchesTheEnabledRuntime(t *testing.T) {
 		t.Fatalf("summary should admit that isolation is absent: %q", none)
 	}
 }
+
+func TestSafetySerializesEmptyFileRootsAsAnArray(t *testing.T) {
+	server := httptest.NewServer(api.New(api.Deps{Runtime: api.RuntimeInfo{}}))
+	defer server.Close()
+
+	response, err := server.Client().Get(server.URL + "/api/safety")
+	if err != nil {
+		t.Fatalf("safety request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("safety status = %d", response.StatusCode)
+	}
+	var decoded struct {
+		Runtime struct {
+			FileRoots json.RawMessage `json:"file_roots"`
+		} `json:"runtime"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode safety: %v", err)
+	}
+	if string(decoded.Runtime.FileRoots) != "[]" {
+		t.Fatalf("file_roots must be [] when unconfigured, got %s", decoded.Runtime.FileRoots)
+	}
+}

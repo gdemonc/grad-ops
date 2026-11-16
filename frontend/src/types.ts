@@ -50,6 +50,17 @@ export type Postcondition = {
   stdout_contains: string
 }
 
+export type FileTarget = {
+  root: string
+  root_device: number
+  root_inode: number
+  relative: string
+  operation: string
+  data?: string
+  device: number
+  inode: number
+}
+
 export type ActionContract = {
   task_id: number
   tool: string
@@ -65,6 +76,7 @@ export type ActionContract = {
   runtime: { timeout_ms: number; max_output_bytes: number; max_calls: number }
   postcondition: Postcondition
   compensation?: Postcondition | null
+  file_target?: FileTarget | null
   risk: string
   policy_version: string
   approval_level: string
@@ -101,6 +113,7 @@ export type ApprovalItem = {
   risk_level: string
   proposal_status: string
   request_text: string
+  contract?: ActionContract | null
 }
 
 export type ExecutionItem = {
@@ -157,6 +170,7 @@ export type SafetyRuntime = {
   work_dir: string
   contract_work_dir: string
   allowed_roots: string[]
+  file_roots?: string[] | null
   policy_version: string
   approval_ttl_ms: number
   worker_enabled: boolean

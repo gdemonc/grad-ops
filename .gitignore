@@ -23,3 +23,6 @@ frontend/dist/
 
 # Local build output
 /bin/
+
+# Local npm cache used in sandboxed builds
+frontend/.npm-cache/

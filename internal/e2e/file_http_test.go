@@ -171,9 +171,9 @@ func TestHTTPFileAppendThroughWorkerApprovalAndExecutor(t *testing.T) {
 	stopRun()
 
 	var proposalID int64
-	var raw, digest string
-	if err := db.QueryRow(`SELECT id, contract, contract_digest FROM proposals WHERE task_id = ? ORDER BY id DESC LIMIT 1`, created.ID).
-		Scan(&proposalID, &raw, &digest); err != nil {
+	var raw, digest, proposalTool string
+	if err := db.QueryRow(`SELECT id, contract, contract_digest, tool FROM proposals WHERE task_id = ? ORDER BY id DESC LIMIT 1`, created.ID).
+		Scan(&proposalID, &raw, &digest, &proposalTool); err != nil {
 		t.Fatalf("load proposal: %v", err)
 	}
 	var frozen contract.Contract
@@ -182,6 +182,9 @@ func TestHTTPFileAppendThroughWorkerApprovalAndExecutor(t *testing.T) {
 	}
 	if err := contract.Verify(frozen, digest); err != nil {
 		t.Fatalf("contract verify: %v", err)
+	}
+	if proposalTool != "fileops" || frozen.Tool != "fileops" {
+		t.Fatalf("proposal tool mismatch: row=%q contract=%q", proposalTool, frozen.Tool)
 	}
 	if frozen.FileTarget == nil || frozen.FileTarget.Device == 0 || frozen.FileTarget.Inode == 0 {
 		t.Fatalf("contract did not bind a file identity: %+v", frozen.FileTarget)
@@ -198,6 +201,23 @@ func TestHTTPFileAppendThroughWorkerApprovalAndExecutor(t *testing.T) {
 	}
 	if err := json.Unmarshal(body, &approvalResponse); err != nil || approvalResponse.Token == "" {
 		t.Fatalf("approval token missing: %v %s", err, body)
+	}
+
+	status, body = httpJSON(t, server.Client(), http.MethodGet,
+		server.URL+"/api/approvals?status=PENDING", nil)
+	if status != http.StatusOK {
+		t.Fatalf("list approvals: status=%d body=%s", status, body)
+	}
+	var listedApprovals []struct {
+		ProposalID int64              `json:"proposal_id"`
+		Contract   *contract.Contract `json:"contract"`
+	}
+	if err := json.Unmarshal(body, &listedApprovals); err != nil {
+		t.Fatalf("decode approvals: %v", err)
+	}
+	if len(listedApprovals) == 0 || listedApprovals[0].Contract == nil ||
+		listedApprovals[0].Contract.FileTarget == nil {
+		t.Fatalf("approval list did not expose the bound file target: %s", body)
 	}
 
 	status, body = httpJSON(t, server.Client(), http.MethodPost,

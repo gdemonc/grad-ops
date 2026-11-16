@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { proposalStatusMeta, riskMeta, shortHash } from '../types'
+import FileTargetSummary from './FileTargetSummary.vue'
 import type { ProposalItem } from '../types'
 
 defineProps<{
@@ -26,10 +27,16 @@ defineProps<{
       <span class="k">动作类型</span>
       <span class="v mono">{{ proposal.contract.kind }}</span>
     </div>
-    <div class="kv">
-      <span class="k">执行脚本</span>
-    </div>
-    <pre class="json">{{ proposal.contract.script }}</pre>
+    <template v-if="proposal.contract.file_target">
+      <div class="kv"><span class="k">文件操作</span></div>
+      <FileTargetSummary :target="proposal.contract.file_target" />
+    </template>
+    <template v-else>
+      <div class="kv">
+        <span class="k">执行脚本</span>
+      </div>
+      <pre class="json">{{ proposal.contract.script }}</pre>
+    </template>
 
     <div class="kv">
       <span class="k">后置条件</span>

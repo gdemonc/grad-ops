@@ -183,10 +183,11 @@ func TestFullLoop(t *testing.T) {
 		proposalID int64
 		raw        string
 		digest     string
+		tool       string
 	)
 	if err := db.QueryRow(
-		`SELECT id, contract, contract_digest FROM proposals WHERE task_id = ? ORDER BY id DESC LIMIT 1`,
-		created.ID).Scan(&proposalID, &raw, &digest); err != nil {
+		`SELECT id, contract, contract_digest, tool FROM proposals WHERE task_id = ? ORDER BY id DESC LIMIT 1`,
+		created.ID).Scan(&proposalID, &raw, &digest, &tool); err != nil {
 		t.Fatalf("load proposal: %v", err)
 	}
 
@@ -196,6 +197,9 @@ func TestFullLoop(t *testing.T) {
 	}
 	if err := contract.Verify(frozen, digest); err != nil {
 		t.Fatalf("proposal contract does not verify: %v", err)
+	}
+	if tool != "bash" || frozen.Tool != "bash" {
+		t.Fatalf("proposal tool mismatch: row=%q contract=%q", tool, frozen.Tool)
 	}
 	if frozen.Risk != string(domain.RiskR2) {
 		t.Fatalf("expected R2 for a service restart, got %s", frozen.Risk)
