@@ -239,7 +239,7 @@ func run() error {
 			WorkDir:               cfg.WorkDir,
 			ContractWorkDir:       cfg.ContractWorkDir,
 			AllowedRoots:          cfg.AllowedRoots,
-			FileRoots:             cfg.FileRoots,
+			FileRoots:             append([]string{}, cfg.FileRoots...),
 			PolicyVersion:         cfg.PolicyVersion,
 			ApprovalTTLMS:         cfg.ApprovalTTL.Milliseconds(),
 			WorkerEnabled:         cfg.EnableWorker,

@@ -170,7 +170,7 @@ export type SafetyRuntime = {
   work_dir: string
   contract_work_dir: string
   allowed_roots: string[]
-  file_roots: string[]
+  file_roots?: string[] | null
   policy_version: string
   approval_ttl_ms: number
   worker_enabled: boolean

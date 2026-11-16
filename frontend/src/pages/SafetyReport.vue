@@ -5,12 +5,14 @@ import {
   IconExclamationCircleFill,
   IconRefresh,
 } from '@arco-design/web-vue/es/icon'
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { runtimeFileRoots } from '../observability'
 import { useTasksStore } from '../stores/tasks'
 import { guardStatusMeta } from '../types'
 import type { SafetyGuard, SafetyReport, SafetyRuntime } from '../types'
 
 const store = useTasksStore()
+const fileRoots = computed(() => runtimeFileRoots(store.safetyReport?.runtime))
 
 function bannerType(status: SafetyReport['overall_status']): 'success' | 'warning' | 'error' {
   if (status === 'ok') return 'success'
@@ -213,9 +215,9 @@ onMounted(() => {
 
           <a-card class="panel">
             <template #title><div class="panel-title">FileOps 可写根</div></template>
-            <div v-if="store.safetyReport.runtime.file_roots.length" class="tag-row">
+            <div v-if="fileRoots.length" class="tag-row">
               <a-tag
-                v-for="root in store.safetyReport.runtime.file_roots"
+                v-for="root in fileRoots"
                 :key="root"
                 color="arcoblue"
                 class="mono"

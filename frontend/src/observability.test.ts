@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fileIdentity, fileTargetPreview, observationMeta } from './observability'
+import { fileIdentity, fileTargetPreview, observationMeta, runtimeFileRoots } from './observability'
 import type { FileTarget } from './types'
 
 const target: FileTarget = {
@@ -39,5 +39,16 @@ describe('fileTargetPreview', () => {
 describe('fileIdentity', () => {
   it('renders the root and target identity as dev:inode', () => {
     expect(fileIdentity(target.root_device, target.root_inode)).toBe('10:20')
+  })
+})
+
+describe('runtimeFileRoots', () => {
+  it('treats a null file_roots value from an older server as disabled', () => {
+    expect(runtimeFileRoots({ file_roots: null })).toEqual([])
+    expect(runtimeFileRoots(null)).toEqual([])
+  })
+
+  it('preserves configured roots', () => {
+    expect(runtimeFileRoots({ file_roots: ['/var/log'] })).toEqual(['/var/log'])
   })
 })

@@ -357,6 +357,7 @@ func (h *handlers) listVerifications(w http.ResponseWriter, r *http.Request) {
 // dashboard.
 func (h *handlers) safety(w http.ResponseWriter, _ *http.Request) {
 	info := h.deps.Runtime
+	info.FileRoots = nonNilStrings(info.FileRoots)
 
 	guards := []guardDTO{
 		{Key: "policy", Name: "确定性策略", Status: "ok",
@@ -485,6 +486,13 @@ func safetySummary(info RuntimeInfo, overall string) string {
 	}
 	parts = append(parts, "仍无 seccomp、网络 allowlist 或 privileged broker")
 	return strings.Join(parts, "；")
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func fileOpsStatus(info RuntimeInfo) string {

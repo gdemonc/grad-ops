@@ -91,7 +91,7 @@ Shell、Policy、Approval 与 Linux Runtime 的职责边界见 [Tool 层安全�
 | 多轮只读诊断 Agent Loop | 已实现（可选）：`GRADOPS_AGENT_LOOP=true` 时模型每轮看到已保存的 Evidence，选择 `observe` 或 `finish`；支持单轮多条串行观察、轮数/调用/上下文预算、finalization-only 收尾、按 attempt 区分证据、逐条 Evidence/Audit；默认关闭 |
 | per-action bubblewrap 沙箱 | 已实现并验证：`GRADOPS_SANDBOX=bubblewrap` 时使用独立 mount/PID/IPC/UTS/user/network namespace、只读根和按策略绑定的可写根；真实 systemd 服务上启动校验通过，任务探针在沙箱内完成并封存 |
 | Linux 隔离（systemd、文件系统、网络） | **已实现（可选）**：bubblewrap 沙箱提供 namespace、只读根和默认隔离网络；默认 `.env.example` 为 `none`，部署示例启用 `bubblewrap` |
-| Console | 已实现：任务、详情、审批、审计和安全报告已对接 Go API；展示 FileOps 目标/append 内容/身份与 Agent Loop 的 round/attempt；`npm test` + `npm run build` 通过 |
+| Console | 已实现：任务、详情、审批、审计和安全报告已对接 Go API；展示 FileOps 目标/append 内容/身份与 Agent Loop 的 round/attempt；`npm test` + `npm run build` 通过；FileOps 未配置时 Safety 显示禁用（file_roots 稳定为 []） |
 | Linux CI | 已实现：GitHub Actions 在 Ubuntu 上跑 build/vet/test/race，并单独验证最低 Go 1.26.0（[Linux CI workflow](https://github.com/gdemonc/grad-ops/actions/workflows/linux-ci.yml)） |
 | systemd 部署 | 已实现：hardened unit、环境文件、安装脚本和静态检查；要求 systemd 254+（`DelegateSubgroup`）；已在真实 systemd 主机安装运行，per-action cgroup 验证通过；`ProtectSystem`/`PrivateTmp` 等 unit 边界的逐项运行效果未单独测试 |
 

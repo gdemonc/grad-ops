@@ -29,3 +29,8 @@ export function fileTargetPreview(target: FileTarget, limit = 200): { text: stri
 export function fileIdentity(device: number, inode: number): string {
   return `${device}:${inode}`
 }
+
+/** Normalize old servers that serialize an empty FileRoots slice as null. */
+export function runtimeFileRoots(runtime: { file_roots?: string[] | null } | null | undefined): string[] {
+  return runtime?.file_roots ?? []
+}
